@@ -1,0 +1,827 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Baara Tehni - 12 Beads Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { font-family: 'Poppins', sans-serif; }
+        
+        .board-cell {
+            transition: all 0.2s ease;
+        }
+        
+        .board-cell:hover:not(.has-piece) {
+            background: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+        
+        .board-cell.selected {
+            box-shadow: 0 0 0 4px #fbbf24, 0 0 20px rgba(251, 191, 36, 0.5);
+            transform: scale(1.1);
+        }
+        
+        .board-cell.valid-move {
+            background: rgba(34, 197, 94, 0.3);
+            animation: pulse 1s infinite;
+        }
+        
+        .board-cell.capture-move {
+            background: rgba(239, 68, 68, 0.3);
+            animation: pulse 1s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+        
+        .piece {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            cursor: pointer;
+        }
+        
+        .piece:hover {
+            transform: scale(1.15);
+        }
+        
+        .piece.player1 {
+            background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+            box-shadow: 0 4px 15px rgba(239, 68, 68, 0.5), inset 0 2px 4px rgba(255,255,255,0.3);
+        }
+        
+        .piece.player2 {
+            background: linear-gradient(135deg, #22c55e 0%, #15803d 100%);
+            box-shadow: 0 4px 15px rgba(34, 197, 94, 0.5), inset 0 2px 4px rgba(255,255,255,0.3);
+        }
+        
+        .game-board {
+            background: linear-gradient(145deg, #1e3a5f 0%, #0f172a 100%);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 0 60px rgba(255,255,255,0.05);
+        }
+        
+        .floating {
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        .slide-in {
+            animation: slideIn 0.5s ease-out;
+        }
+        
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .toast {
+            animation: toastIn 0.3s ease-out, toastOut 0.3s ease-in 2.7s forwards;
+        }
+        
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(100%); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+        
+        @keyframes toastOut {
+            from { opacity: 1; transform: translateX(0); }
+            to { opacity: 0; transform: translateX(100%); }
+        }
+        
+        .btn-glow:hover {
+            box-shadow: 0 0 20px currentColor;
+        }
+        
+        .coin {
+            animation: coinFlip 1s ease-in-out;
+        }
+        
+        @keyframes coinFlip {
+            0% { transform: rotateY(0deg); }
+            100% { transform: rotateY(1800deg); }
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+    <!-- Toast Container -->
+    <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+    <!-- Setup Screen -->
+    <div id="setupScreen" class="min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 slide-in">
+            <div class="text-center mb-8">
+                <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-2">
+                    🎮 Baara Tehni
+                </h1>
+                <p class="text-white/60">The Classic 12 Beads Strategy Game</p>
+            </div>
+            
+            <div class="space-y-6">
+                <div>
+                    <label class="block text-amber-400 font-medium mb-2">
+                        <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                        Player 1 Name
+                    </label>
+                    <input type="text" id="player1Input" placeholder="Enter name..." 
+                        class="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition">
+                </div>
+                
+                <div>
+                    <label class="block text-emerald-400 font-medium mb-2">
+                        <span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span>
+                        Player 2 Name
+                    </label>
+                    <input type="text" id="player2Input" placeholder="Enter name or 'Computer'..." 
+                        class="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition">
+                </div>
+                
+                <div class="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/10">
+                    <input type="checkbox" id="vsComputer" class="w-5 h-5 rounded accent-emerald-500">
+                    <label for="vsComputer" class="text-white/80 cursor-pointer">Play against Computer 🤖</label>
+                </div>
+                
+                <button onclick="checkSavedGame()" 
+                    class="w-full py-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold text-lg hover:from-amber-600 hover:to-orange-600 transition transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-orange-500/30">
+                    Start Game ✨
+                </button>
+                
+                <div id="loadGameSection" class="hidden">
+                    <div class="text-center text-white/60 my-4">— or —</div>
+                    <button onclick="loadGame()" 
+                        class="w-full py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition">
+                        📂 Continue Saved Game
+                    </button>
+                </div>
+            </div>
+            
+            <div class="mt-8 text-center text-white/40 text-sm">
+                <p>Move beads to capture opponents. First to eliminate all enemy beads wins!</p>
+            </div>
+        </div>
+    </div>
+    <!-- Coin Toss Screen -->
+    <div id="coinTossScreen" class="hidden min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 text-center">
+            <h2 class="text-3xl font-bold text-white mb-6">🪙 Coin Toss!</h2>
+            <p class="text-white/60 mb-8">Who goes first?</p>
+            
+            <div id="coinContainer" class="mb-8">
+                <div id="coin" class="w-32 h-32 mx-auto rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-4xl shadow-2xl">
+                    🪙
+                </div>
+            </div>
+            
+            <div id="coinButtons" class="flex gap-4 justify-center">
+                <button onclick="flipCoin('heads')" 
+                    class="px-8 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold hover:from-blue-600 hover:to-blue-700 transition">
+                    Heads 👆
+                </button>
+                <button onclick="flipCoin('tails')" 
+                    class="px-8 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold hover:from-purple-600 hover:to-purple-700 transition">
+                    Tails 👇
+                </button>
+            </div>
+            
+            <div id="coinResult" class="hidden mt-6">
+                <p id="coinResultText" class="text-2xl font-bold text-amber-400"></p>
+                <button onclick="startGame()" 
+                    class="mt-4 px-8 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold hover:from-emerald-600 hover:to-emerald-700 transition">
+                    Let's Play! 🎮
+                </button>
+            </div>
+        </div>
+    </div>
+    <!-- Game Screen -->
+    <div id="gameScreen" class="hidden min-h-screen p-4 md:p-8">
+        <div class="max-w-4xl mx-auto">
+            <!-- Header -->
+            <div class="text-center mb-6">
+                <h1 class="text-3xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">
+                    Baara Tehni
+                </h1>
+            </div>
+            
+            <!-- Player Info -->
+            <div class="flex justify-between items-center mb-6 gap-4">
+                <div id="player1Card" class="flex-1 p-4 rounded-2xl bg-gradient-to-r from-red-500/20 to-red-600/10 border border-red-500/30 transition-all">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center text-white font-bold shadow-lg">X</div>
+                        <div>
+                            <p id="player1Name" class="text-white font-semibold"></p>
+                            <p class="text-white/60 text-sm"><span id="player1Beads">12</span> beads</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="turnIndicator" class="px-4 py-2 rounded-full bg-amber-500/20 border border-amber-500/30">
+                    <span id="turnText" class="text-amber-400 font-medium text-sm"></span>
+                </div>
+                
+                <div id="player2Card" class="flex-1 p-4 rounded-2xl bg-gradient-to-r from-green-600/10 to-green-500/20 border border-green-500/30 transition-all">
+                    <div class="flex items-center gap-3 justify-end">
+                        <div class="text-right">
+                            <p id="player2Name" class="text-white font-semibold"></p>
+                            <p class="text-white/60 text-sm"><span id="player2Beads">12</span> beads</p>
+                        </div>
+                        <div class="w-10 h-10 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center text-white font-bold shadow-lg">O</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Game Board -->
+            <div class="flex justify-center mb-6">
+                <div class="game-board rounded-2xl p-4 md:p-6">
+                    <!-- Column Numbers -->
+                    <div class="flex mb-2 pl-8">
+                        <div class="w-12 md:w-16 text-center text-cyan-400 font-medium">0</div>
+                        <div class="w-12 md:w-16 text-center text-cyan-400 font-medium">1</div>
+                        <div class="w-12 md:w-16 text-center text-cyan-400 font-medium">2</div>
+                        <div class="w-12 md:w-16 text-center text-cyan-400 font-medium">3</div>
+                        <div class="w-12 md:w-16 text-center text-cyan-400 font-medium">4</div>
+                    </div>
+                    
+                    <div id="board" class="grid gap-1"></div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="flex flex-wrap justify-center gap-3 mb-6">
+                <button onclick="undoMove()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
+                    ↩️ Undo
+                </button>
+                <button onclick="redoMove()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
+                    ↪️ Redo
+                </button>
+                <button onclick="saveGame()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
+                    💾 Save
+                </button>
+                <button onclick="confirmNewGame()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
+                    🔄 New Game
+                </button>
+            </div>
+            
+            <!-- Instructions -->
+            <div class="text-center text-white/40 text-sm">
+                <p>Click a piece to select, then click an empty cell to move. Jump over enemies to capture!</p>
+            </div>
+        </div>
+    </div>
+    <!-- Victory Modal -->
+    <div id="victoryModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-8 max-w-md w-full border border-white/20 text-center slide-in">
+            <div class="text-6xl mb-4">🏆</div>
+            <h2 id="winnerText" class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-4"></h2>
+            <p id="winReason" class="text-white/60 mb-8"></p>
+            <button onclick="newGame()" 
+                class="px-8 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold hover:from-amber-600 hover:to-orange-600 transition">
+                Play Again 🎮
+            </button>
+        </div>
+    </div>
+    <script>
+        // Game Constants
+        const BOARD_SIZE = 5;
+        const MAX_MOVES = 100;
+        // Game State
+        let board = [];
+        let player1Name = '';
+        let player2Name = '';
+        let currentPlayer = 1;
+        let player1Beads = 12;
+        let player2Beads = 12;
+        let isComputer = false;
+        let selectedCell = null;
+        let validMoves = [];
+        let captureMoves = [];
+        let chainCapture = false;
+        let chainCaptureFrom = null;
+        // History for undo/redo
+        let history = [];
+        let currentMoveIndex = -1;
+        // Initialize board
+        function initializeBoard() {
+            board = [];
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                board[i] = [];
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    if (i < 2) {
+                        board[i][j] = 'X';
+                    } else if (i > 2) {
+                        board[i][j] = 'O';
+                    } else if (i === 2) {
+                        if (j < 2) board[i][j] = 'X';
+                        else if (j > 2) board[i][j] = 'O';
+                        else board[i][j] = '.';
+                    }
+                }
+            }
+            player1Beads = 12;
+            player2Beads = 12;
+        }
+        // Render board
+        function renderBoard() {
+            const boardEl = document.getElementById('board');
+            boardEl.innerHTML = '';
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                const row = document.createElement('div');
+                row.className = 'flex items-center';
+                
+                // Row number
+                const rowNum = document.createElement('div');
+                rowNum.className = 'w-8 text-center text-cyan-400 font-medium';
+                rowNum.textContent = i;
+                row.appendChild(rowNum);
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'board-cell w-12 h-12 md:w-16 md:h-16 rounded-lg bg-slate-700/50 border border-slate-600/50 flex items-center justify-center cursor-pointer';
+                    cell.dataset.row = i;
+                    cell.dataset.col = j;
+                    // Check if this is a valid move
+                    const isValidMove = validMoves.some(m => m.toR === i && m.toC === j);
+                    const isCaptureMove = captureMoves.some(m => m.toR === i && m.toC === j);
+                    if (isValidMove) cell.classList.add('valid-move');
+                    if (isCaptureMove) cell.classList.add('capture-move');
+                    if (board[i][j] === 'X') {
+                        const piece = document.createElement('div');
+                        piece.className = 'piece player1 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
+                        piece.textContent = 'X';
+                        cell.appendChild(piece);
+                        cell.classList.add('has-piece');
+                    } else if (board[i][j] === 'O') {
+                        const piece = document.createElement('div');
+                        piece.className = 'piece player2 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
+                        piece.textContent = 'O';
+                        cell.appendChild(piece);
+                        cell.classList.add('has-piece');
+                    }
+                    // Selected state
+                    if (selectedCell && selectedCell.row === i && selectedCell.col === j) {
+                        cell.classList.add('selected');
+                    }
+                    cell.addEventListener('click', () => handleCellClick(i, j));
+                    row.appendChild(cell);
+                }
+                boardEl.appendChild(row);
+            }
+            // Update UI
+            document.getElementById('player1Beads').textContent = player1Beads;
+            document.getElementById('player2Beads').textContent = player2Beads;
+            
+            const turnText = currentPlayer === 1 ? `${player1Name}'s Turn` : `${player2Name}'s Turn`;
+            document.getElementById('turnText').textContent = turnText;
+            // Highlight current player card
+            const p1Card = document.getElementById('player1Card');
+            const p2Card = document.getElementById('player2Card');
+            
+            if (currentPlayer === 1) {
+                p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+                p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+            } else {
+                p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+                p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+            }
+        }
+        // Handle cell click
+        function handleCellClick(row, col) {
+            const playerChar = currentPlayer === 1 ? 'X' : 'O';
+            // If in chain capture mode
+            if (chainCapture) {
+                const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
+                if (captureMove) {
+                    executeCapture(captureMove);
+                    return;
+                }
+                return;
+            }
+            // If clicking on own piece, select it
+            if (board[row][col] === playerChar) {
+                selectedCell = { row, col };
+                calculateValidMoves(row, col, playerChar);
+                renderBoard();
+                return;
+            }
+            // If a piece is selected and clicking on valid move
+            if (selectedCell) {
+                const simpleMove = validMoves.find(m => m.toR === row && m.toC === col && !m.isCapture);
+                const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
+                if (captureMove) {
+                    executeCapture(captureMove);
+                } else if (simpleMove) {
+                    executeMove(simpleMove);
+                } else {
+                    selectedCell = null;
+                    validMoves = [];
+                    captureMoves = [];
+                    renderBoard();
+                }
+            }
+        }
+        // Calculate valid moves
+        function calculateValidMoves(fromR, fromC, playerChar) {
+            validMoves = [];
+            captureMoves = [];
+            const directions = [
+                [-1, 0], [1, 0], [0, -1], [0, 1],
+                [-1, -1], [-1, 1], [1, -1], [1, 1]
+            ];
+            for (const [dr, dc] of directions) {
+                // Simple move
+                const toR = fromR + dr;
+                const toC = fromC + dc;
+                if (isValidSimpleMove(fromR, fromC, toR, toC, playerChar)) {
+                    validMoves.push({ fromR, fromC, toR, toC, isCapture: false });
+                }
+                // Capture move
+                const capToR = fromR + dr * 2;
+                const capToC = fromC + dc * 2;
+                const captureInfo = isValidCapture(fromR, fromC, capToR, capToC, playerChar);
+                if (captureInfo.valid) {
+                    captureMoves.push({ 
+                        fromR, fromC, 
+                        toR: capToR, toC: capToC, 
+                        capR: captureInfo.capR, capC: captureInfo.capC,
+                        isCapture: true 
+                    });
+                }
+            }
+        }
+        // Check valid simple move
+        function isValidSimpleMove(fromR, fromC, toR, toC, playerChar) {
+            if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) return false;
+            if (board[toR][toC] !== '.') return false;
+            
+            const dr = Math.abs(toR - fromR);
+            const dc = Math.abs(toC - fromC);
+            return dr <= 1 && dc <= 1 && !(dr === 0 && dc === 0);
+        }
+        // Check valid capture
+        function isValidCapture(fromR, fromC, toR, toC, playerChar) {
+            if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) {
+                return { valid: false };
+            }
+            if (board[toR][toC] !== '.') return { valid: false };
+            const dr = toR - fromR;
+            const dc = toC - fromC;
+            if (!((dr === -2 || dr === 0 || dr === 2) && (dc === -2 || dc === 0 || dc === 2))) {
+                return { valid: false };
+            }
+            if (dr === 0 && dc === 0) return { valid: false };
+            const capR = fromR + dr / 2;
+            const capC = fromC + dc / 2;
+            const opponent = playerChar === 'X' ? 'O' : 'X';
+            if (board[capR][capC] === opponent) {
+                return { valid: true, capR, capC };
+            }
+            return { valid: false };
+        }
+        // Execute simple move
+        function executeMove(move) {
+            const playerChar = currentPlayer === 1 ? 'X' : 'O';
+            board[move.toR][move.toC] = playerChar;
+            board[move.fromR][move.fromC] = '.';
+            showToast('Move successful! ✓', 'success');
+            saveToHistory();
+            switchTurn();
+        }
+        // Execute capture
+        function executeCapture(move) {
+            const playerChar = currentPlayer === 1 ? 'X' : 'O';
+            board[move.toR][move.toC] = playerChar;
+            board[move.fromR][move.fromC] = '.';
+            board[move.capR][move.capC] = '.';
+            if (playerChar === 'X') {
+                player2Beads--;
+            } else {
+                player1Beads--;
+            }
+            showToast('Captured! 🎯', 'capture');
+            // Check for chain captures
+            const chainMoves = [];
+            const directions = [
+                [-1, 0], [1, 0], [0, -1], [0, 1],
+                [-1, -1], [-1, 1], [1, -1], [1, 1]
+            ];
+            for (const [dr, dc] of directions) {
+                const capToR = move.toR + dr * 2;
+                const capToC = move.toC + dc * 2;
+                const captureInfo = isValidCapture(move.toR, move.toC, capToR, capToC, playerChar);
+                if (captureInfo.valid) {
+                    chainMoves.push({
+                        fromR: move.toR, fromC: move.toC,
+                        toR: capToR, toC: capToC,
+                        capR: captureInfo.capR, capC: captureInfo.capC,
+                        isCapture: true
+                    });
+                }
+            }
+            if (chainMoves.length > 0) {
+                chainCapture = true;
+                chainCaptureFrom = { row: move.toR, col: move.toC };
+                selectedCell = chainCaptureFrom;
+                validMoves = [];
+                captureMoves = chainMoves;
+                renderBoard();
+                showToast('Chain capture available! 🔥', 'info');
+                return;
+            }
+            chainCapture = false;
+            chainCaptureFrom = null;
+            saveToHistory();
+            switchTurn();
+        }
+        // Switch turn
+        function switchTurn() {
+            selectedCell = null;
+            validMoves = [];
+            captureMoves = [];
+            // Check win conditions
+            if (checkWinCondition()) return;
+            currentPlayer = currentPlayer === 1 ? 2 : 1;
+            renderBoard();
+            // Check if new player has moves
+            if (!hasAnyMove(currentPlayer === 1 ? 'X' : 'O')) {
+                const winner = currentPlayer === 1 ? player2Name : player1Name;
+                showVictory(winner, 'No legal moves available!');
+                return;
+            }
+            // Computer's turn
+            if (isComputer && currentPlayer === 2) {
+                setTimeout(computerMove, 1000);
+            }
+        }
+        // Check win condition
+        function checkWinCondition() {
+            if (player1Beads === 0) {
+                showVictory(player2Name, 'All opponent beads captured!');
+                return true;
+            }
+            if (player2Beads === 0) {
+                showVictory(player1Name, 'All opponent beads captured!');
+                return true;
+            }
+            return false;
+        }
+        // Check if player has any move
+        function hasAnyMove(playerChar) {
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                for (let j = 0; j < BOARD_SIZE; j++) {
+                    if (board[i][j] === playerChar) {
+                        const directions = [
+                            [-1, 0], [1, 0], [0, -1], [0, 1],
+                            [-1, -1], [-1, 1], [1, -1], [1, 1]
+                        ];
+                        for (const [dr, dc] of directions) {
+                            if (isValidSimpleMove(i, j, i + dr, j + dc, playerChar)) return true;
+                            if (isValidCapture(i, j, i + dr * 2, j + dc * 2, playerChar).valid) return true;
+                        }
+                    }
+                }
+            }
+            return false;
+        }
+        // Computer move
+        function computerMove() {
+            // Priority: capture > simple move
+            let bestMove = null;
+            // Find captures
+            for (let i = 0; i < BOARD_SIZE && !bestMove; i++) {
+                for (let j = 0; j < BOARD_SIZE && !bestMove; j++) {
+                    if (board[i][j] === 'O') {
+                        const directions = [
+                            [-1, 0], [1, 0], [0, -1], [0, 1],
+                            [-1, -1], [-1, 1], [1, -1], [1, 1]
+                        ];
+                        for (const [dr, dc] of directions) {
+                            const captureInfo = isValidCapture(i, j, i + dr * 2, j + dc * 2, 'O');
+                            if (captureInfo.valid) {
+                                bestMove = {
+                                    fromR: i, fromC: j,
+                                    toR: i + dr * 2, toC: j + dc * 2,
+                                    capR: captureInfo.capR, capC: captureInfo.capC,
+                                    isCapture: true
+                                };
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            // Find simple moves if no capture
+            if (!bestMove) {
+                for (let i = 0; i < BOARD_SIZE && !bestMove; i++) {
+                    for (let j = 0; j < BOARD_SIZE && !bestMove; j++) {
+                        if (board[i][j] === 'O') {
+                            const directions = [
+                                [-1, 0], [1, 0], [0, -1], [0, 1],
+                                [-1, -1], [-1, 1], [1, -1], [1, 1]
+                            ];
+                            for (const [dr, dc] of directions) {
+                                if (isValidSimpleMove(i, j, i + dr, j + dc, 'O')) {
+                                    bestMove = {
+                                        fromR: i, fromC: j,
+                                        toR: i + dr, toC: j + dc,
+                                        isCapture: false
+                                    };
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if (bestMove) {
+                if (bestMove.isCapture) {
+                    selectedCell = { row: bestMove.fromR, col: bestMove.fromC };
+                    captureMoves = [bestMove];
+                    renderBoard();
+                    setTimeout(() => executeCapture(bestMove), 500);
+                } else {
+                    selectedCell = { row: bestMove.fromR, col: bestMove.fromC };
+                    validMoves = [bestMove];
+                    renderBoard();
+                    setTimeout(() => executeMove(bestMove), 500);
+                }
+            }
+        }
+        // Save to history
+        function saveToHistory() {
+            currentMoveIndex++;
+            history = history.slice(0, currentMoveIndex);
+            history.push({
+                board: board.map(row => [...row]),
+                player1Beads,
+                player2Beads,
+                currentPlayer
+            });
+        }
+        // Undo move
+        function undoMove() {
+            if (currentMoveIndex > 0) {
+                currentMoveIndex--;
+                restoreFromHistory();
+                showToast('Move undone ↩️', 'info');
+            } else {
+                showToast('Nothing to undo!', 'error');
+            }
+        }
+        // Redo move
+        function redoMove() {
+            if (currentMoveIndex < history.length - 1) {
+                currentMoveIndex++;
+                restoreFromHistory();
+                showToast('Move redone ↪️', 'info');
+            } else {
+                showToast('Nothing to redo!', 'error');
+            }
+        }
+        // Restore from history
+        function restoreFromHistory() {
+            const state = history[currentMoveIndex];
+            board = state.board.map(row => [...row]);
+            player1Beads = state.player1Beads;
+            player2Beads = state.player2Beads;
+            currentPlayer = state.currentPlayer;
+            selectedCell = null;
+            validMoves = [];
+            captureMoves = [];
+            chainCapture = false;
+            renderBoard();
+        }
+        // Save game
+        function saveGame() {
+            const gameState = {
+                board,
+                player1Name,
+                player2Name,
+                currentPlayer,
+                player1Beads,
+                player2Beads,
+                isComputer,
+                history,
+                currentMoveIndex
+            };
+            localStorage.setItem('baaraTehniSave', JSON.stringify(gameState));
+            showToast('Game saved! 💾', 'success');
+        }
+        // Load game
+        function loadGame() {
+            const saved = localStorage.getItem('baaraTehniSave');
+            if (saved) {
+                const gameState = JSON.parse(saved);
+                board = gameState.board;
+                player1Name = gameState.player1Name;
+                player2Name = gameState.player2Name;
+                currentPlayer = gameState.currentPlayer;
+                player1Beads = gameState.player1Beads;
+                player2Beads = gameState.player2Beads;
+                isComputer = gameState.isComputer;
+                history = gameState.history;
+                currentMoveIndex = gameState.currentMoveIndex;
+                document.getElementById('player1Name').textContent = player1Name;
+                document.getElementById('player2Name').textContent = player2Name;
+                document.getElementById('setupScreen').classList.add('hidden');
+                document.getElementById('gameScreen').classList.remove('hidden');
+                renderBoard();
+                showToast('Game loaded! 📂', 'success');
+            }
+        }
+        // Check for saved game
+        function checkSavedGame() {
+            player1Name = document.getElementById('player1Input').value || 'Player 1';
+            player2Name = document.getElementById('player2Input').value || 'Player 2';
+            isComputer = document.getElementById('vsComputer').checked;
+            if (isComputer) {
+                player2Name = 'Computer 🤖';
+            }
+            document.getElementById('player1Name').textContent = player1Name;
+            document.getElementById('player2Name').textContent = player2Name;
+            document.getElementById('setupScreen').classList.add('hidden');
+            document.getElementById('coinTossScreen').classList.remove('hidden');
+        }
+        // Flip coin
+        function flipCoin(choice) {
+            const coin = document.getElementById('coin');
+            const buttons = document.getElementById('coinButtons');
+            const result = document.getElementById('coinResult');
+            const resultText = document.getElementById('coinResultText');
+            coin.classList.add('coin');
+            buttons.classList.add('hidden');
+            setTimeout(() => {
+                const outcome = Math.random() < 0.5 ? 'heads' : 'tails';
+                coin.textContent = outcome === 'heads' ? '👆' : '👇';
+                
+                currentPlayer = choice === outcome ? 1 : 2;
+                
+                const winner = currentPlayer === 1 ? player1Name : player2Name;
+                resultText.innerHTML = `It's ${outcome.toUpperCase()}!<br><span class="text-white">${winner} goes first!</span>`;
+                result.classList.remove('hidden');
+            }, 1000);
+        }
+        // Start game
+        function startGame() {
+            initializeBoard();
+            saveToHistory();
+            
+            document.getElementById('coinTossScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.remove('hidden');
+            renderBoard();
+            if (isComputer && currentPlayer === 2) {
+                setTimeout(computerMove, 1000);
+            }
+        }
+        // Show victory
+        function showVictory(winner, reason) {
+            document.getElementById('winnerText').textContent = `${winner} Wins!`;
+            document.getElementById('winReason').textContent = reason;
+            document.getElementById('victoryModal').classList.remove('hidden');
+            localStorage.removeItem('baaraTehniSave');
+        }
+        // Confirm new game
+        function confirmNewGame() {
+            if (confirm('Start a new game? Current progress will be lost.')) {
+                newGame();
+            }
+        }
+        // New game
+        function newGame() {
+            document.getElementById('victoryModal').classList.add('hidden');
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('setupScreen').classList.remove('hidden');
+            
+            history = [];
+            currentMoveIndex = -1;
+            selectedCell = null;
+            validMoves = [];
+            captureMoves = [];
+            chainCapture = false;
+        }
+        // Show toast
+        function showToast(message, type) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            let bgColor = 'bg-slate-700';
+            if (type === 'success') bgColor = 'bg-emerald-600';
+            if (type === 'error') bgColor = 'bg-red-600';
+            if (type === 'capture') bgColor = 'bg-purple-600';
+            if (type === 'info') bgColor = 'bg-blue-600';
+            toast.className = `toast px-4 py-2 rounded-lg ${bgColor} text-white font-medium shadow-lg`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+        // Check for saved game on load
+        window.onload = () => {
+            const saved = localStorage.getItem('baaraTehniSave');
+            if (saved) {
+                document.getElementById('loadGameSection').classList.remove('hidden');
+            }
+        };
+    </script>
+</body>
+</html>
