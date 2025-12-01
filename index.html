@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Baara Tehni - 12 Beads Game</title>
+    <title>Baara Tehni - Online Multiplayer</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { font-family: 'Poppins', sans-serif; }
@@ -13,7 +14,7 @@
             transition: all 0.2s ease;
         }
         
-        .board-cell:hover:not(.has-piece) {
+        .board-cell:hover:not(.has-piece):not(.disabled) {
             background: rgba(255, 255, 255, 0.2);
             transform: scale(1.05);
         }
@@ -31,6 +32,11 @@
         .board-cell.capture-move {
             background: rgba(239, 68, 68, 0.3);
             animation: pulse 1s infinite;
+        }
+        
+        .board-cell.disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
         }
         
         @keyframes pulse {
@@ -106,97 +112,259 @@
             0% { transform: rotateY(0deg); }
             100% { transform: rotateY(1800deg); }
         }
+        
+        .connecting-dots::after {
+            content: '';
+            animation: dots 1.5s infinite;
+        }
+        
+        @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+        }
+        
+        .pulse-ring {
+            animation: pulseRing 2s infinite;
+        }
+        
+        @keyframes pulseRing {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+        
+        .copy-btn:active {
+            transform: scale(0.95);
+        }
     </style>
 </head>
 <body class="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
     <!-- Toast Container -->
     <div id="toastContainer" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
-    <!-- Setup Screen -->
-    <div id="setupScreen" class="min-h-screen flex items-center justify-center p-4">
+
+
+        <!-- Developer Info -->
+    <div class="fixed top-4 right-4 z-50">
+        <button onclick="toggleDevInfo()" class="px-4 py-2 rounded-xl bg-white/10 backdrop-blur-xl border border-white/20 text-white/80 hover:bg-white/20 hover:text-white transition flex items-center gap-2">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+            About
+        </button>
+    </div>
+
+    <!-- Developer Info Modal -->
+    <div id="devInfoModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-8 max-w-lg w-full border border-white/20 slide-in">
+            <div class="flex justify-between items-start mb-6">
+                <div>
+                    <h2 class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-1">
+                        Baara Tehni
+                    </h2>
+                    <p class="text-white/60">The Classic 12 Beads Strategy Game</p>
+                </div>
+                <button onclick="toggleDevInfo()" class="text-white/60 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+            
+            <div class="space-y-4 text-white/80">
+                <div>
+                    <h3 class="text-xl font-semibold text-white mb-2">🎮 About the Game</h3>
+                    <p class="text-sm leading-relaxed">
+                        Baara Tehni is a traditional South Asian strategy board game played on a 5×5 grid. 
+                        Each player starts with 12 beads and aims to capture all opponent pieces or block their moves. 
+                        The game features simple moves and strategic captures by jumping over enemy pieces.
+                    </p>
+                </div>
+                
+                <div class="pt-4 border-t border-white/10">
+                    <h3 class="text-xl font-semibold text-white mb-2">👨‍💻 Developer</h3>
+                    <div class="bg-white/5 rounded-xl p-4">
+                        <p class="text-lg font-semibold text-amber-400 mb-1">Faizan Muhammad</p>
+                        <p class="text-sm text-white/70 leading-relaxed">
+                            Full-stack developer passionate about bringing traditional games to the digital world. 
+                            This online multiplayer version combines cultural heritage with modern web technologies, 
+                            featuring real-time gameplay, AI opponent, and intuitive design.
+                        </p>
+                    </div>
+                </div>
+                
+                <div class="pt-4 border-t border-white/10">
+                    <h3 class="text-lg font-semibold text-white mb-2">✨ Features</h3>
+                    <ul class="text-sm text-white/70 space-y-1">
+                        <li>• Online multiplayer with room codes</li>
+                        <li>• Smart AI opponent (Faizan Bot)</li>
+                        <li>• Offline local multiplayer</li>
+                        <li>• Chain capture mechanics</li>
+                        <li>• Responsive design for all devices</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Main Menu Screen -->
+    <div id="mainMenuScreen" class="min-h-screen flex items-center justify-center p-4">
         <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 slide-in">
             <div class="text-center mb-8">
                 <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-2">
                     🎮 Baara Tehni
                 </h1>
-                <p class="text-white/60">The Classic 12 Beads Strategy Game</p>
-                <p class="text-white/60">Developer - Faizan Muhammad</p>
+                <p class="text-white/60">Online Multiplayer</p>
+                <p class="text-white/40 text-sm mt-2">The Classic 12 Beads Strategy Game</p>
             </div>
             
-            <div class="space-y-6">
+            <div class="space-y-4">
                 <div>
-                    <label class="block text-amber-400 font-medium mb-2">
-                        <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
-                        Player 1 Name
-                    </label>
-                    <input type="text" id="player1Input" placeholder="Enter name..." 
+                    <label class="block text-white/80 font-medium mb-2">Your Name</label>
+                    <input type="text" id="playerNameInput" placeholder="Enter your name..." 
                         class="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 transition">
                 </div>
                 
-                <div>
-                    <label class="block text-emerald-400 font-medium mb-2">
-                        <span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span>
-                        Player 2 Name
-                    </label>
-                    <input type="text" id="player2Input" placeholder="Enter name or 'Computer'..." 
-                        class="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition">
-                </div>
-                
-                <div class="flex items-center gap-3 p-4 rounded-xl bg-white/5 border border-white/10">
-                    <input type="checkbox" id="vsComputer" class="w-5 h-5 rounded accent-emerald-500">
-                    <label for="vsComputer" class="text-white/80 cursor-pointer">Play against Computer 🤖</label>
-                </div>
-                
-                <button onclick="checkSavedGame()" 
+                <button onclick="showCreateRoom()" 
                     class="w-full py-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold text-lg hover:from-amber-600 hover:to-orange-600 transition transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-orange-500/30">
-                    Start Game ✨
+                    🏠 Create Room
                 </button>
                 
-                <div id="loadGameSection" class="hidden">
-                    <div class="text-center text-white/60 my-4">— or —</div>
-                    <button onclick="loadGame()" 
-                        class="w-full py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition">
-                        📂 Continue Saved Game
-                    </button>
-                </div>
+                <button onclick="showJoinRoom()" 
+                    class="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold text-lg hover:from-emerald-600 hover:to-teal-600 transition transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-emerald-500/30">
+                    🔗 Join Room
+                </button>
+                
+                <button onclick="playOffline()" 
+                    class="w-full py-3 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition">
+                    🎯 Play Offline
+                </button>
             </div>
             
             <div class="mt-8 text-center text-white/40 text-sm">
-                <p>Move beads to capture opponents. First to eliminate all enemy beads wins!</p>
+                <p>Create a room and share the code with friends to play together!</p>
             </div>
         </div>
     </div>
-    <!-- Coin Toss Screen -->
-    <div id="coinTossScreen" class="hidden min-h-screen flex items-center justify-center p-4">
-        <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 text-center">
-            <h2 class="text-3xl font-bold text-white mb-6">🪙 Coin Toss!</h2>
-            <p class="text-white/60 mb-8">Who goes first?</p>
+
+    <!-- Create Room Screen -->
+    <div id="createRoomScreen" class="hidden min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 slide-in">
+            <button onclick="backToMenu()" class="text-white/60 hover:text-white mb-4 flex items-center gap-2">
+                ← Back
+            </button>
             
-            <div id="coinContainer" class="mb-8">
-                <div id="coin" class="w-32 h-32 mx-auto rounded-full bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-4xl shadow-2xl">
-                    🪙
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold text-white mb-2">🏠 Create Room</h2>
+                <p class="text-white/60">Share this code with your friend</p>
+            </div>
+            
+            <div class="bg-white/5 rounded-2xl p-6 mb-6">
+                <p class="text-white/60 text-sm mb-2 text-center">Room Code</p>
+                <div class="flex items-center justify-center gap-3">
+                    <span id="roomCodeDisplay" class="text-4xl font-bold text-amber-400 tracking-widest"></span>
+                    <button onclick="copyRoomCode()" class="copy-btn p-2 rounded-lg bg-white/10 hover:bg-white/20 transition">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path>
+                        </svg>
+                    </button>
+                </div>
+                
+                <div class="mt-4 pt-4 border-t border-white/10">
+                    <p class="text-white/60 text-sm mb-2 text-center">Or share this link</p>
+                    <div class="flex items-center gap-2">
+                        <input type="text" id="roomLinkDisplay" readonly
+                            class="flex-1 px-3 py-2 rounded-lg bg-white/10 text-white/80 text-sm truncate">
+                        <button onclick="copyRoomLink()" class="copy-btn px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 transition text-white text-sm">
+                            Copy
+                        </button>
+                    </div>
                 </div>
             </div>
             
-            <div id="coinButtons" class="flex gap-4 justify-center">
-                <button onclick="flipCoin('heads')" 
-                    class="px-8 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 text-white font-semibold hover:from-blue-600 hover:to-blue-700 transition">
-                    Heads 👆
-                </button>
-                <button onclick="flipCoin('tails')" 
-                    class="px-8 py-3 rounded-xl bg-gradient-to-r from-purple-500 to-purple-600 text-white font-semibold hover:from-purple-600 hover:to-purple-700 transition">
-                    Tails 👇
+            <div class="text-center">
+                <div class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5">
+                    <div class="relative">
+                        <div class="w-3 h-3 bg-amber-400 rounded-full"></div>
+                        <div class="absolute inset-0 w-3 h-3 bg-amber-400 rounded-full pulse-ring"></div>
+                    </div>
+                    <span class="text-white/60">Waiting for opponent<span class="connecting-dots"></span></span>
+                </div>
+            </div>
+            
+            <div id="connectionStatus" class="mt-4 text-center text-white/40 text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Join Room Screen -->
+    <div id="joinRoomScreen" class="hidden min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 slide-in">
+            <button onclick="backToMenu()" class="text-white/60 hover:text-white mb-4 flex items-center gap-2">
+                ← Back
+            </button>
+            
+            <div class="text-center mb-8">
+                <h2 class="text-3xl font-bold text-white mb-2">🔗 Join Room</h2>
+                <p class="text-white/60">Enter the room code to join</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-white/80 font-medium mb-2">Room Code</label>
+                    <input type="text" id="joinCodeInput" placeholder="Enter 6-digit code..." maxlength="6"
+                        class="w-full px-4 py-3 rounded-xl bg-white/10 border border-white/20 text-white placeholder-white/40 focus:outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20 transition text-center text-2xl tracking-widest uppercase">
+                </div>
+                
+                <button onclick="joinRoom()" id="joinBtn"
+                    class="w-full py-4 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold text-lg hover:from-emerald-600 hover:to-teal-600 transition transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-emerald-500/30">
+                    Join Game 🎮
                 </button>
             </div>
             
-            <div id="coinResult" class="hidden mt-6">
-                <p id="coinResultText" class="text-2xl font-bold text-amber-400"></p>
-                <button onclick="startGame()" 
-                    class="mt-4 px-8 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 text-white font-semibold hover:from-emerald-600 hover:to-emerald-700 transition">
-                    Let's Play! 🎮
+            <div id="joinStatus" class="mt-4 text-center text-white/40 text-sm"></div>
+        </div>
+    </div>
+
+    <!-- Waiting Room Screen -->
+    <div id="waitingRoomScreen" class="hidden min-h-screen flex items-center justify-center p-4">
+        <div class="bg-white/10 backdrop-blur-xl rounded-3xl p-8 max-w-md w-full border border-white/20 slide-in text-center">
+            <div class="mb-8">
+                <h2 class="text-3xl font-bold text-white mb-2">🎮 Game Ready!</h2>
+                <p class="text-white/60">Both players connected</p>
+            </div>
+            
+            <div class="flex items-center justify-center gap-6 mb-8">
+                <div class="text-center">
+                    <div class="w-16 h-16 rounded-full bg-gradient-to-br from-red-400 to-red-600 flex items-center justify-center text-white font-bold text-2xl mb-2">X</div>
+                    <p id="waitingPlayer1" class="text-white font-medium"></p>
+                    <p class="text-red-400 text-sm">Player 1</p>
+                </div>
+                <div class="text-white/40 text-2xl">VS</div>
+                <div class="text-center">
+                    <div class="w-16 h-16 rounded-full bg-gradient-to-br from-green-400 to-green-600 flex items-center justify-center text-white font-bold text-2xl mb-2">O</div>
+                    <p id="waitingPlayer2" class="text-white font-medium"></p>
+                    <p class="text-green-400 text-sm">Player 2</p>
+                </div>
+            </div>
+            
+            <div id="hostControls" class="hidden">
+                <button onclick="hostStartGame()" 
+                    class="w-full py-4 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold text-lg hover:from-amber-600 hover:to-orange-600 transition transform hover:scale-[1.02] active:scale-[0.98] shadow-lg shadow-orange-500/30">
+                    Start Game ✨
                 </button>
+            </div>
+            
+            <div id="guestWaiting" class="hidden">
+                <div class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5">
+                    <div class="relative">
+                        <div class="w-3 h-3 bg-emerald-400 rounded-full"></div>
+                        <div class="absolute inset-0 w-3 h-3 bg-emerald-400 rounded-full pulse-ring"></div>
+                    </div>
+                    <span class="text-white/60">Waiting for host to start<span class="connecting-dots"></span></span>
+                </div>
             </div>
         </div>
     </div>
+
     <!-- Game Screen -->
     <div id="gameScreen" class="hidden min-h-screen p-4 md:p-8">
         <div class="max-w-4xl mx-auto">
@@ -205,6 +373,10 @@
                 <h1 class="text-3xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">
                     Baara Tehni
                 </h1>
+                <div id="onlineIndicator" class="hidden inline-flex items-center gap-2 mt-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/30">
+                    <div class="w-2 h-2 bg-emerald-400 rounded-full"></div>
+                    <span class="text-emerald-400 text-sm">Online</span>
+                </div>
             </div>
             
             <!-- Player Info -->
@@ -216,6 +388,7 @@
                             <p id="player1Name" class="text-white font-semibold"></p>
                             <p class="text-white/60 text-sm"><span id="player1Beads">12</span> beads</p>
                         </div>
+                        <span id="player1You" class="hidden ml-2 px-2 py-0.5 rounded text-xs bg-red-500/30 text-red-300">YOU</span>
                     </div>
                 </div>
                 
@@ -225,6 +398,7 @@
                 
                 <div id="player2Card" class="flex-1 p-4 rounded-2xl bg-gradient-to-r from-green-600/10 to-green-500/20 border border-green-500/30 transition-all">
                     <div class="flex items-center gap-3 justify-end">
+                        <span id="player2You" class="hidden mr-2 px-2 py-0.5 rounded text-xs bg-green-500/30 text-green-300">YOU</span>
                         <div class="text-right">
                             <p id="player2Name" class="text-white font-semibold"></p>
                             <p class="text-white/60 text-sm"><span id="player2Beads">12</span> beads</p>
@@ -252,42 +426,87 @@
             
             <!-- Action Buttons -->
             <div class="flex flex-wrap justify-center gap-3 mb-6">
-                <button onclick="undoMove()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
-                    ↩️ Undo
+                <button onclick="requestRematch()" id="rematchBtn" class="hidden px-5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-medium hover:from-amber-600 hover:to-orange-600 transition flex items-center gap-2">
+                    🔄 Rematch
                 </button>
-                <button onclick="redoMove()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
-                    ↪️ Redo
-                </button>
-                <button onclick="saveGame()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
-                    💾 Save
-                </button>
-                <button onclick="confirmNewGame()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
-                    🔄 New Game
+                <button onclick="leaveGame()" class="px-5 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white font-medium hover:bg-white/20 transition flex items-center gap-2">
+                    🚪 Leave Game
                 </button>
             </div>
             
             <!-- Instructions -->
-            <div class="text-center text-white/40 text-sm">
+            <div id="gameInstructions" class="text-center text-white/40 text-sm">
                 <p>Click a piece to select, then click an empty cell to move. Jump over enemies to capture!</p>
+            </div>
+            
+            <div id="waitingTurn" class="hidden text-center">
+                <div class="inline-flex items-center gap-3 px-4 py-2 rounded-full bg-white/5">
+                    <div class="relative">
+                        <div class="w-3 h-3 bg-blue-400 rounded-full"></div>
+                        <div class="absolute inset-0 w-3 h-3 bg-blue-400 rounded-full pulse-ring"></div>
+                    </div>
+                    <span class="text-white/60">Waiting for opponent's move<span class="connecting-dots"></span></span>
+                </div>
             </div>
         </div>
     </div>
+
     <!-- Victory Modal -->
     <div id="victoryModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
         <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-8 max-w-md w-full border border-white/20 text-center slide-in">
             <div class="text-6xl mb-4">🏆</div>
             <h2 id="winnerText" class="text-3xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500 mb-4"></h2>
             <p id="winReason" class="text-white/60 mb-8"></p>
-            <button onclick="newGame()" 
+            <div class="flex gap-3 justify-center">
+                <button onclick="requestRematch()" id="modalRematchBtn"
+                    class="px-8 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold hover:from-amber-600 hover:to-orange-600 transition">
+                    Rematch 🔄
+                </button>
+                <button onclick="leaveGame()" 
+                    class="px-8 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-semibold hover:bg-white/20 transition">
+                    Leave 🚪
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Disconnection Modal -->
+    <div id="disconnectModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-8 max-w-md w-full border border-white/20 text-center slide-in">
+            <div class="text-6xl mb-4">😢</div>
+            <h2 class="text-2xl font-bold text-white mb-4">Opponent Disconnected</h2>
+            <p class="text-white/60 mb-8">Your opponent has left the game.</p>
+            <button onclick="backToMenu()" 
                 class="px-8 py-3 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-white font-semibold hover:from-amber-600 hover:to-orange-600 transition">
-                Play Again 🎮
+                Back to Menu
             </button>
         </div>
     </div>
+
+    <!-- Rematch Request Modal -->
+    <div id="rematchModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div class="bg-gradient-to-br from-slate-800 to-slate-900 rounded-3xl p-8 max-w-md w-full border border-white/20 text-center slide-in">
+            <div class="text-6xl mb-4">🔄</div>
+            <h2 class="text-2xl font-bold text-white mb-4">Rematch Request</h2>
+            <p id="rematchText" class="text-white/60 mb-8"></p>
+            <div class="flex gap-3 justify-center">
+                <button onclick="acceptRematch()" 
+                    class="px-8 py-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-white font-semibold hover:from-emerald-600 hover:to-teal-600 transition">
+                    Accept ✓
+                </button>
+                <button onclick="declineRematch()" 
+                    class="px-8 py-3 rounded-xl bg-white/10 border border-white/20 text-white font-semibold hover:bg-white/20 transition">
+                    Decline ✗
+                </button>
+            </div>
+        </div>
+    </div>
+
     <script>
         // Game Constants
         const BOARD_SIZE = 5;
-        const MAX_MOVES = 100;
+        const ROOM_CODE_LENGTH = 6;
+
         // Game State
         let board = [];
         let player1Name = '';
@@ -295,15 +514,287 @@
         let currentPlayer = 1;
         let player1Beads = 12;
         let player2Beads = 12;
-        let isComputer = false;
         let selectedCell = null;
         let validMoves = [];
         let captureMoves = [];
         let chainCapture = false;
         let chainCaptureFrom = null;
-        // History for undo/redo
-        let history = [];
-        let currentMoveIndex = -1;
+        let gameOver = false;
+
+        // Online State
+        let peer = null;
+        let conn = null;
+        let isHost = false;
+        let myPlayerNumber = 0;
+        let roomCode = '';
+        let myName = '';
+        let opponentName = '';
+        let isOnline = false;
+
+        // Generate room code
+        function generateRoomCode() {
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+            let code = '';
+            for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+                code += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            return code;
+        }
+
+        // Initialize PeerJS
+        function initializePeer(id = null) {
+            return new Promise((resolve, reject) => {
+                const peerId = id ? `baara-tehni-${id}` : undefined;
+                peer = new Peer(peerId, {
+                    debug: 1
+                });
+
+                peer.on('open', (id) => {
+                    console.log('Peer ID:', id);
+                    resolve(id);
+                });
+
+                peer.on('error', (err) => {
+                    console.error('Peer error:', err);
+                    if (err.type === 'unavailable-id') {
+                        showToast('Room code already in use. Try another.', 'error');
+                    } else if (err.type === 'peer-unavailable') {
+                        showToast('Room not found. Check the code.', 'error');
+                        document.getElementById('joinStatus').textContent = 'Room not found';
+                    } else {
+                        showToast('Connection error. Please try again.', 'error');
+                    }
+                    reject(err);
+                });
+
+                peer.on('connection', (connection) => {
+                    handleConnection(connection);
+                });
+
+                peer.on('disconnected', () => {
+                    console.log('Peer disconnected');
+                });
+            });
+        }
+
+        // Handle connection
+        function handleConnection(connection) {
+            conn = connection;
+            
+            conn.on('open', () => {
+                console.log('Connection opened');
+                if (isHost) {
+                    // Send player info to guest
+                    conn.send({
+                        type: 'playerInfo',
+                        name: myName,
+                        playerNumber: 1
+                    });
+                }
+            });
+
+            conn.on('data', (data) => {
+                handleMessage(data);
+            });
+
+            conn.on('close', () => {
+                console.log('Connection closed');
+                if (isOnline && !gameOver) {
+                    showDisconnectModal();
+                }
+            });
+
+            conn.on('error', (err) => {
+                console.error('Connection error:', err);
+                showToast('Connection error', 'error');
+            });
+        }
+
+        // Handle incoming messages
+        function handleMessage(data) {
+            console.log('Received:', data);
+
+            switch (data.type) {
+                case 'playerInfo':
+                    opponentName = data.name;
+                    if (!isHost) {
+                        myPlayerNumber = 2;
+                        player1Name = opponentName;
+                        player2Name = myName;
+                        // Send back our info
+                        conn.send({
+                            type: 'playerInfo',
+                            name: myName,
+                            playerNumber: 2
+                        });
+                        showWaitingRoom();
+                    } else {
+                        player2Name = opponentName;
+                        showWaitingRoom();
+                    }
+                    break;
+
+                case 'startGame':
+                    currentPlayer = data.firstPlayer;
+                    startOnlineGame();
+                    break;
+
+                case 'move':
+                    receiveMove(data);
+                    break;
+
+                case 'rematchRequest':
+                    showRematchRequest(data.from);
+                    break;
+
+                case 'rematchAccepted':
+                    startRematch();
+                    break;
+
+                case 'rematchDeclined':
+                    showToast('Rematch declined', 'info');
+                    break;
+
+                case 'chat':
+                    showToast(`${opponentName}: ${data.message}`, 'info');
+                    break;
+            }
+        }
+
+        // Show create room screen
+        async function showCreateRoom() {
+            myName = document.getElementById('playerNameInput').value.trim() || 'Player 1';
+            roomCode = generateRoomCode();
+            
+            document.getElementById('mainMenuScreen').classList.add('hidden');
+            document.getElementById('createRoomScreen').classList.remove('hidden');
+            document.getElementById('roomCodeDisplay').textContent = roomCode;
+            
+            const roomLink = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+            document.getElementById('roomLinkDisplay').value = roomLink;
+            document.getElementById('connectionStatus').textContent = 'Initializing...';
+
+            try {
+                await initializePeer(roomCode);
+                isHost = true;
+                myPlayerNumber = 1;
+                player1Name = myName;
+                document.getElementById('connectionStatus').textContent = 'Room created! Waiting for player...';
+            } catch (err) {
+                document.getElementById('connectionStatus').textContent = 'Failed to create room';
+            }
+        }
+
+        // Show join room screen
+        function showJoinRoom() {
+            myName = document.getElementById('playerNameInput').value.trim() || 'Player 2';
+            
+            document.getElementById('mainMenuScreen').classList.add('hidden');
+            document.getElementById('joinRoomScreen').classList.remove('hidden');
+
+            // Check for room code in URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlRoomCode = urlParams.get('room');
+            if (urlRoomCode) {
+                document.getElementById('joinCodeInput').value = urlRoomCode.toUpperCase();
+            }
+        }
+
+        // Join room
+        async function joinRoom() {
+            const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
+            if (code.length !== ROOM_CODE_LENGTH) {
+                showToast('Please enter a valid 6-character code', 'error');
+                return;
+            }
+
+            roomCode = code;
+            document.getElementById('joinStatus').textContent = 'Connecting...';
+            document.getElementById('joinBtn').disabled = true;
+
+            try {
+                await initializePeer();
+                isHost = false;
+                
+                // Connect to host
+                conn = peer.connect(`baara-tehni-${roomCode}`, {
+                    reliable: true
+                });
+                
+                handleConnection(conn);
+                
+                conn.on('open', () => {
+                    conn.send({
+                        type: 'playerInfo',
+                        name: myName,
+                        playerNumber: 2
+                    });
+                });
+
+            } catch (err) {
+                document.getElementById('joinStatus').textContent = 'Failed to connect';
+                document.getElementById('joinBtn').disabled = false;
+            }
+        }
+
+        // Show waiting room
+        function showWaitingRoom() {
+            document.getElementById('createRoomScreen').classList.add('hidden');
+            document.getElementById('joinRoomScreen').classList.add('hidden');
+            document.getElementById('waitingRoomScreen').classList.remove('hidden');
+
+            document.getElementById('waitingPlayer1').textContent = player1Name;
+            document.getElementById('waitingPlayer2').textContent = player2Name;
+
+            if (isHost) {
+                document.getElementById('hostControls').classList.remove('hidden');
+                document.getElementById('guestWaiting').classList.add('hidden');
+            } else {
+                document.getElementById('hostControls').classList.add('hidden');
+                document.getElementById('guestWaiting').classList.remove('hidden');
+            }
+        }
+
+        // Host starts game
+        function hostStartGame() {
+            // Random first player
+            const firstPlayer = Math.random() < 0.5 ? 1 : 2;
+            currentPlayer = firstPlayer;
+            
+            conn.send({
+                type: 'startGame',
+                firstPlayer: firstPlayer
+            });
+            
+            startOnlineGame();
+        }
+
+        // Start online game
+        function startOnlineGame() {
+            isOnline = true;
+            gameOver = false;
+            initializeBoard();
+            
+            document.getElementById('waitingRoomScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.remove('hidden');
+            document.getElementById('onlineIndicator').classList.remove('hidden');
+            
+            document.getElementById('player1Name').textContent = player1Name;
+            document.getElementById('player2Name').textContent = player2Name;
+
+            // Show YOU badge
+            if (myPlayerNumber === 1) {
+                document.getElementById('player1You').classList.remove('hidden');
+                document.getElementById('player2You').classList.add('hidden');
+            } else {
+                document.getElementById('player2You').classList.remove('hidden');
+                document.getElementById('player1You').classList.add('hidden');
+            }
+
+            renderBoard();
+            updateTurnUI();
+        }
+
         // Initialize board
         function initializeBoard() {
             board = [];
@@ -323,30 +814,79 @@
             }
             player1Beads = 12;
             player2Beads = 12;
+            selectedCell = null;
+            validMoves = [];
+            captureMoves = [];
+            chainCapture = false;
         }
+
+        // Check if it's my turn
+        function isMyTurn() {
+            if (!isOnline) return true;
+            return currentPlayer === myPlayerNumber;
+        }
+
+        // Update turn UI
+        function updateTurnUI() {
+            const turnText = currentPlayer === 1 ? `${player1Name}'s Turn` : `${player2Name}'s Turn`;
+            document.getElementById('turnText').textContent = turnText;
+
+            // Show/hide waiting indicator
+            if (isOnline) {
+                if (isMyTurn()) {
+                    document.getElementById('waitingTurn').classList.add('hidden');
+                    document.getElementById('gameInstructions').classList.remove('hidden');
+                } else {
+                    document.getElementById('waitingTurn').classList.remove('hidden');
+                    document.getElementById('gameInstructions').classList.add('hidden');
+                }
+            }
+
+            // Highlight current player card
+            const p1Card = document.getElementById('player1Card');
+            const p2Card = document.getElementById('player2Card');
+            
+            if (currentPlayer === 1) {
+                p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+                p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+            } else {
+                p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+                p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+            }
+        }
+
         // Render board
         function renderBoard() {
             const boardEl = document.getElementById('board');
             boardEl.innerHTML = '';
+            
+            const canInteract = !isOnline || isMyTurn();
+            
             for (let i = 0; i < BOARD_SIZE; i++) {
                 const row = document.createElement('div');
                 row.className = 'flex items-center';
                 
-                // Row number
                 const rowNum = document.createElement('div');
                 rowNum.className = 'w-8 text-center text-cyan-400 font-medium';
                 rowNum.textContent = i;
                 row.appendChild(rowNum);
+
                 for (let j = 0; j < BOARD_SIZE; j++) {
                     const cell = document.createElement('div');
                     cell.className = 'board-cell w-12 h-12 md:w-16 md:h-16 rounded-lg bg-slate-700/50 border border-slate-600/50 flex items-center justify-center cursor-pointer';
                     cell.dataset.row = i;
                     cell.dataset.col = j;
-                    // Check if this is a valid move
+
+                    if (!canInteract) {
+                        cell.classList.add('disabled');
+                    }
+
                     const isValidMove = validMoves.some(m => m.toR === i && m.toC === j);
                     const isCaptureMove = captureMoves.some(m => m.toR === i && m.toC === j);
-                    if (isValidMove) cell.classList.add('valid-move');
-                    if (isCaptureMove) cell.classList.add('capture-move');
+                    
+                    if (isValidMove && canInteract) cell.classList.add('valid-move');
+                    if (isCaptureMove && canInteract) cell.classList.add('capture-move');
+
                     if (board[i][j] === 'X') {
                         const piece = document.createElement('div');
                         piece.className = 'piece player1 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
@@ -360,60 +900,55 @@
                         cell.appendChild(piece);
                         cell.classList.add('has-piece');
                     }
-                    // Selected state
+
                     if (selectedCell && selectedCell.row === i && selectedCell.col === j) {
                         cell.classList.add('selected');
                     }
-                    cell.addEventListener('click', () => handleCellClick(i, j));
+
+                    if (canInteract) {
+                        cell.addEventListener('click', () => handleCellClick(i, j));
+                    }
+                    
                     row.appendChild(cell);
                 }
                 boardEl.appendChild(row);
             }
-            // Update UI
+
             document.getElementById('player1Beads').textContent = player1Beads;
             document.getElementById('player2Beads').textContent = player2Beads;
-            
-            const turnText = currentPlayer === 1 ? `${player1Name}'s Turn` : `${player2Name}'s Turn`;
-            document.getElementById('turnText').textContent = turnText;
-            // Highlight current player card
-            const p1Card = document.getElementById('player1Card');
-            const p2Card = document.getElementById('player2Card');
-            
-            if (currentPlayer === 1) {
-                p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
-                p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
-            } else {
-                p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
-                p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
-            }
+            updateTurnUI();
         }
+
         // Handle cell click
         function handleCellClick(row, col) {
+            if (!isMyTurn() && isOnline) return;
+            
             const playerChar = currentPlayer === 1 ? 'X' : 'O';
-            // If in chain capture mode
+
             if (chainCapture) {
                 const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
                 if (captureMove) {
-                    executeCapture(captureMove);
+                    executeCapture(captureMove, true);
                     return;
                 }
                 return;
             }
-            // If clicking on own piece, select it
+
             if (board[row][col] === playerChar) {
                 selectedCell = { row, col };
                 calculateValidMoves(row, col, playerChar);
                 renderBoard();
                 return;
             }
-            // If a piece is selected and clicking on valid move
+
             if (selectedCell) {
                 const simpleMove = validMoves.find(m => m.toR === row && m.toC === col && !m.isCapture);
                 const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
+
                 if (captureMove) {
-                    executeCapture(captureMove);
+                    executeCapture(captureMove, true);
                 } else if (simpleMove) {
-                    executeMove(simpleMove);
+                    executeMove(simpleMove, true);
                 } else {
                     selectedCell = null;
                     validMoves = [];
@@ -422,22 +957,24 @@
                 }
             }
         }
+
         // Calculate valid moves
         function calculateValidMoves(fromR, fromC, playerChar) {
             validMoves = [];
             captureMoves = [];
+            
             const directions = [
                 [-1, 0], [1, 0], [0, -1], [0, 1],
                 [-1, -1], [-1, 1], [1, -1], [1, 1]
             ];
+
             for (const [dr, dc] of directions) {
-                // Simple move
                 const toR = fromR + dr;
                 const toC = fromC + dc;
                 if (isValidSimpleMove(fromR, fromC, toR, toC, playerChar)) {
                     validMoves.push({ fromR, fromC, toR, toC, isCapture: false });
                 }
-                // Capture move
+
                 const capToR = fromR + dr * 2;
                 const capToC = fromC + dc * 2;
                 const captureInfo = isValidCapture(fromR, fromC, capToR, capToC, playerChar);
@@ -451,6 +988,7 @@
                 }
             }
         }
+
         // Check valid simple move
         function isValidSimpleMove(fromR, fromC, toR, toC, playerChar) {
             if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) return false;
@@ -460,53 +998,72 @@
             const dc = Math.abs(toC - fromC);
             return dr <= 1 && dc <= 1 && !(dr === 0 && dc === 0);
         }
+
         // Check valid capture
         function isValidCapture(fromR, fromC, toR, toC, playerChar) {
             if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) {
                 return { valid: false };
             }
             if (board[toR][toC] !== '.') return { valid: false };
+            
             const dr = toR - fromR;
             const dc = toC - fromC;
             if (!((dr === -2 || dr === 0 || dr === 2) && (dc === -2 || dc === 0 || dc === 2))) {
                 return { valid: false };
             }
             if (dr === 0 && dc === 0) return { valid: false };
+            
             const capR = fromR + dr / 2;
             const capC = fromC + dc / 2;
             const opponent = playerChar === 'X' ? 'O' : 'X';
+            
             if (board[capR][capC] === opponent) {
                 return { valid: true, capR, capC };
             }
             return { valid: false };
         }
+
         // Execute simple move
-        function executeMove(move) {
+        function executeMove(move, sendToOpponent = false) {
             const playerChar = currentPlayer === 1 ? 'X' : 'O';
             board[move.toR][move.toC] = playerChar;
             board[move.fromR][move.fromC] = '.';
+            
             showToast('Move successful! ✓', 'success');
-            saveToHistory();
+
+            if (sendToOpponent && isOnline) {
+                conn.send({
+                    type: 'move',
+                    moveType: 'simple',
+                    move: move
+                });
+            }
+
             switchTurn();
         }
+
         // Execute capture
-        function executeCapture(move) {
+        function executeCapture(move, sendToOpponent = false) {
             const playerChar = currentPlayer === 1 ? 'X' : 'O';
             board[move.toR][move.toC] = playerChar;
             board[move.fromR][move.fromC] = '.';
             board[move.capR][move.capC] = '.';
+
             if (playerChar === 'X') {
                 player2Beads--;
             } else {
                 player1Beads--;
             }
+
             showToast('Captured! 🎯', 'capture');
+
             // Check for chain captures
             const chainMoves = [];
             const directions = [
                 [-1, 0], [1, 0], [0, -1], [0, 1],
                 [-1, -1], [-1, 1], [1, -1], [1, 1]
             ];
+
             for (const [dr, dc] of directions) {
                 const capToR = move.toR + dr * 2;
                 const capToC = move.toC + dc * 2;
@@ -520,6 +1077,16 @@
                     });
                 }
             }
+
+            if (sendToOpponent && isOnline) {
+                conn.send({
+                    type: 'move',
+                    moveType: 'capture',
+                    move: move,
+                    hasChain: chainMoves.length > 0
+                });
+            }
+
             if (chainMoves.length > 0) {
                 chainCapture = true;
                 chainCaptureFrom = { row: move.toR, col: move.toC };
@@ -530,31 +1097,62 @@
                 showToast('Chain capture available! 🔥', 'info');
                 return;
             }
+
             chainCapture = false;
             chainCaptureFrom = null;
-            saveToHistory();
             switchTurn();
         }
+
+        // Receive move from opponent
+        function receiveMove(data) {
+            if (data.moveType === 'simple') {
+                const move = data.move;
+                const playerChar = currentPlayer === 1 ? 'X' : 'O';
+                board[move.toR][move.toC] = playerChar;
+                board[move.fromR][move.fromC] = '.';
+                showToast('Opponent moved', 'info');
+                switchTurn();
+            } else if (data.moveType === 'capture') {
+                const move = data.move;
+                const playerChar = currentPlayer === 1 ? 'X' : 'O';
+                board[move.toR][move.toC] = playerChar;
+                board[move.fromR][move.fromC] = '.';
+                board[move.capR][move.capC] = '.';
+
+                if (playerChar === 'X') {
+                    player2Beads--;
+                } else {
+                    player1Beads--;
+                }
+
+                showToast('Opponent captured!', 'capture');
+
+                if (!data.hasChain) {
+                    switchTurn();
+                } else {
+                    renderBoard();
+                }
+            }
+        }
+
         // Switch turn
         function switchTurn() {
             selectedCell = null;
             validMoves = [];
             captureMoves = [];
-            // Check win conditions
+
             if (checkWinCondition()) return;
+
             currentPlayer = currentPlayer === 1 ? 2 : 1;
             renderBoard();
-            // Check if new player has moves
+
             if (!hasAnyMove(currentPlayer === 1 ? 'X' : 'O')) {
                 const winner = currentPlayer === 1 ? player2Name : player1Name;
                 showVictory(winner, 'No legal moves available!');
                 return;
             }
-            // Computer's turn
-            if (isComputer && currentPlayer === 2) {
-                setTimeout(computerMove, 1000);
-            }
         }
+
         // Check win condition
         function checkWinCondition() {
             if (player1Beads === 0) {
@@ -567,6 +1165,7 @@
             }
             return false;
         }
+
         // Check if player has any move
         function hasAnyMove(playerChar) {
             for (let i = 0; i < BOARD_SIZE; i++) {
@@ -585,222 +1184,141 @@
             }
             return false;
         }
-        // Computer move
-        function computerMove() {
-            // Priority: capture > simple move
-            let bestMove = null;
-            // Find captures
-            for (let i = 0; i < BOARD_SIZE && !bestMove; i++) {
-                for (let j = 0; j < BOARD_SIZE && !bestMove; j++) {
-                    if (board[i][j] === 'O') {
-                        const directions = [
-                            [-1, 0], [1, 0], [0, -1], [0, 1],
-                            [-1, -1], [-1, 1], [1, -1], [1, 1]
-                        ];
-                        for (const [dr, dc] of directions) {
-                            const captureInfo = isValidCapture(i, j, i + dr * 2, j + dc * 2, 'O');
-                            if (captureInfo.valid) {
-                                bestMove = {
-                                    fromR: i, fromC: j,
-                                    toR: i + dr * 2, toC: j + dc * 2,
-                                    capR: captureInfo.capR, capC: captureInfo.capC,
-                                    isCapture: true
-                                };
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            // Find simple moves if no capture
-            if (!bestMove) {
-                for (let i = 0; i < BOARD_SIZE && !bestMove; i++) {
-                    for (let j = 0; j < BOARD_SIZE && !bestMove; j++) {
-                        if (board[i][j] === 'O') {
-                            const directions = [
-                                [-1, 0], [1, 0], [0, -1], [0, 1],
-                                [-1, -1], [-1, 1], [1, -1], [1, 1]
-                            ];
-                            for (const [dr, dc] of directions) {
-                                if (isValidSimpleMove(i, j, i + dr, j + dc, 'O')) {
-                                    bestMove = {
-                                        fromR: i, fromC: j,
-                                        toR: i + dr, toC: j + dc,
-                                        isCapture: false
-                                    };
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if (bestMove) {
-                if (bestMove.isCapture) {
-                    selectedCell = { row: bestMove.fromR, col: bestMove.fromC };
-                    captureMoves = [bestMove];
-                    renderBoard();
-                    setTimeout(() => executeCapture(bestMove), 500);
-                } else {
-                    selectedCell = { row: bestMove.fromR, col: bestMove.fromC };
-                    validMoves = [bestMove];
-                    renderBoard();
-                    setTimeout(() => executeMove(bestMove), 500);
-                }
-            }
-        }
-        // Save to history
-        function saveToHistory() {
-            currentMoveIndex++;
-            history = history.slice(0, currentMoveIndex);
-            history.push({
-                board: board.map(row => [...row]),
-                player1Beads,
-                player2Beads,
-                currentPlayer
-            });
-        }
-        // Undo move
-        function undoMove() {
-            if (currentMoveIndex > 0) {
-                currentMoveIndex--;
-                restoreFromHistory();
-                showToast('Move undone ↩️', 'info');
-            } else {
-                showToast('Nothing to undo!', 'error');
-            }
-        }
-        // Redo move
-        function redoMove() {
-            if (currentMoveIndex < history.length - 1) {
-                currentMoveIndex++;
-                restoreFromHistory();
-                showToast('Move redone ↪️', 'info');
-            } else {
-                showToast('Nothing to redo!', 'error');
-            }
-        }
-        // Restore from history
-        function restoreFromHistory() {
-            const state = history[currentMoveIndex];
-            board = state.board.map(row => [...row]);
-            player1Beads = state.player1Beads;
-            player2Beads = state.player2Beads;
-            currentPlayer = state.currentPlayer;
-            selectedCell = null;
-            validMoves = [];
-            captureMoves = [];
-            chainCapture = false;
-            renderBoard();
-        }
-        // Save game
-        function saveGame() {
-            const gameState = {
-                board,
-                player1Name,
-                player2Name,
-                currentPlayer,
-                player1Beads,
-                player2Beads,
-                isComputer,
-                history,
-                currentMoveIndex
-            };
-            localStorage.setItem('baaraTehniSave', JSON.stringify(gameState));
-            showToast('Game saved! 💾', 'success');
-        }
-        // Load game
-        function loadGame() {
-            const saved = localStorage.getItem('baaraTehniSave');
-            if (saved) {
-                const gameState = JSON.parse(saved);
-                board = gameState.board;
-                player1Name = gameState.player1Name;
-                player2Name = gameState.player2Name;
-                currentPlayer = gameState.currentPlayer;
-                player1Beads = gameState.player1Beads;
-                player2Beads = gameState.player2Beads;
-                isComputer = gameState.isComputer;
-                history = gameState.history;
-                currentMoveIndex = gameState.currentMoveIndex;
-                document.getElementById('player1Name').textContent = player1Name;
-                document.getElementById('player2Name').textContent = player2Name;
-                document.getElementById('setupScreen').classList.add('hidden');
-                document.getElementById('gameScreen').classList.remove('hidden');
-                renderBoard();
-                showToast('Game loaded! 📂', 'success');
-            }
-        }
-        // Check for saved game
-        function checkSavedGame() {
-            player1Name = document.getElementById('player1Input').value || 'Player 1';
-            player2Name = document.getElementById('player2Input').value || 'Player 2';
-            isComputer = document.getElementById('vsComputer').checked;
-            if (isComputer) {
-                player2Name = 'Computer 🤖';
-            }
-            document.getElementById('player1Name').textContent = player1Name;
-            document.getElementById('player2Name').textContent = player2Name;
-            document.getElementById('setupScreen').classList.add('hidden');
-            document.getElementById('coinTossScreen').classList.remove('hidden');
-        }
-        // Flip coin
-        function flipCoin(choice) {
-            const coin = document.getElementById('coin');
-            const buttons = document.getElementById('coinButtons');
-            const result = document.getElementById('coinResult');
-            const resultText = document.getElementById('coinResultText');
-            coin.classList.add('coin');
-            buttons.classList.add('hidden');
-            setTimeout(() => {
-                const outcome = Math.random() < 0.5 ? 'heads' : 'tails';
-                coin.textContent = outcome === 'heads' ? '👆' : '👇';
-                
-                currentPlayer = choice === outcome ? 1 : 2;
-                
-                const winner = currentPlayer === 1 ? player1Name : player2Name;
-                resultText.innerHTML = `It's ${outcome.toUpperCase()}!<br><span class="text-white">${winner} goes first!</span>`;
-                result.classList.remove('hidden');
-            }, 1000);
-        }
-        // Start game
-        function startGame() {
-            initializeBoard();
-            saveToHistory();
-            
-            document.getElementById('coinTossScreen').classList.add('hidden');
-            document.getElementById('gameScreen').classList.remove('hidden');
-            renderBoard();
-            if (isComputer && currentPlayer === 2) {
-                setTimeout(computerMove, 1000);
-            }
-        }
+
         // Show victory
         function showVictory(winner, reason) {
+            gameOver = true;
             document.getElementById('winnerText').textContent = `${winner} Wins!`;
             document.getElementById('winReason').textContent = reason;
             document.getElementById('victoryModal').classList.remove('hidden');
-            localStorage.removeItem('baaraTehniSave');
+            document.getElementById('rematchBtn').classList.remove('hidden');
         }
-        // Confirm new game
-        function confirmNewGame() {
-            if (confirm('Start a new game? Current progress will be lost.')) {
-                newGame();
+
+        // Request rematch
+        function requestRematch() {
+            if (isOnline && conn) {
+                conn.send({
+                    type: 'rematchRequest',
+                    from: myName
+                });
+                showToast('Rematch request sent!', 'info');
+                document.getElementById('victoryModal').classList.add('hidden');
             }
         }
-        // New game
-        function newGame() {
-            document.getElementById('victoryModal').classList.add('hidden');
-            document.getElementById('gameScreen').classList.add('hidden');
-            document.getElementById('setupScreen').classList.remove('hidden');
-            
-            history = [];
-            currentMoveIndex = -1;
-            selectedCell = null;
-            validMoves = [];
-            captureMoves = [];
-            chainCapture = false;
+
+        // Show rematch request
+        function showRematchRequest(from) {
+            document.getElementById('rematchText').textContent = `${from} wants a rematch!`;
+            document.getElementById('rematchModal').classList.remove('hidden');
         }
+
+        // Accept rematch
+        function acceptRematch() {
+            document.getElementById('rematchModal').classList.add('hidden');
+            if (isOnline && conn) {
+                conn.send({ type: 'rematchAccepted' });
+            }
+            startRematch();
+        }
+
+        // Decline rematch
+        function declineRematch() {
+            document.getElementById('rematchModal').classList.add('hidden');
+            if (isOnline && conn) {
+                conn.send({ type: 'rematchDeclined' });
+            }
+        }
+
+        // Start rematch
+        function startRematch() {
+            document.getElementById('victoryModal').classList.add('hidden');
+            document.getElementById('rematchModal').classList.add('hidden');
+            
+            // Swap first player
+            currentPlayer = currentPlayer === 1 ? 2 : 1;
+            gameOver = false;
+            initializeBoard();
+            renderBoard();
+            showToast('New game started!', 'success');
+        }
+
+        // Show disconnect modal
+        function showDisconnectModal() {
+            document.getElementById('disconnectModal').classList.remove('hidden');
+        }
+
+        // Leave game
+        function leaveGame() {
+            if (conn) {
+                conn.close();
+            }
+            if (peer) {
+                peer.destroy();
+            }
+            backToMenu();
+        }
+
+        // Copy room code
+        function copyRoomCode() {
+            navigator.clipboard.writeText(roomCode);
+            showToast('Room code copied! 📋', 'success');
+        }
+
+        // Copy room link
+        function copyRoomLink() {
+            const link = document.getElementById('roomLinkDisplay').value;
+            navigator.clipboard.writeText(link);
+            showToast('Room link copied! 📋', 'success');
+        }
+
+        // Back to menu
+        function backToMenu() {
+            if (conn) conn.close();
+            if (peer) peer.destroy();
+            
+            peer = null;
+            conn = null;
+            isHost = false;
+            isOnline = false;
+            gameOver = false;
+            
+            document.getElementById('createRoomScreen').classList.add('hidden');
+            document.getElementById('joinRoomScreen').classList.add('hidden');
+            document.getElementById('waitingRoomScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.add('hidden');
+            document.getElementById('victoryModal').classList.add('hidden');
+            document.getElementById('disconnectModal').classList.add('hidden');
+            document.getElementById('rematchModal').classList.add('hidden');
+            document.getElementById('mainMenuScreen').classList.remove('hidden');
+            
+            // Clear URL params
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+
+        // Play offline (original game mode)
+        function playOffline() {
+            isOnline = false;
+            player1Name = document.getElementById('playerNameInput').value.trim() || 'Player 1';
+            player2Name = 'Player 2';
+            myPlayerNumber = 1;
+            currentPlayer = 1;
+            
+            initializeBoard();
+            
+            document.getElementById('mainMenuScreen').classList.add('hidden');
+            document.getElementById('gameScreen').classList.remove('hidden');
+            document.getElementById('onlineIndicator').classList.add('hidden');
+            
+            document.getElementById('player1Name').textContent = player1Name;
+            document.getElementById('player2Name').textContent = player2Name;
+            document.getElementById('player1You').classList.add('hidden');
+            document.getElementById('player2You').classList.add('hidden');
+            document.getElementById('waitingTurn').classList.add('hidden');
+            document.getElementById('gameInstructions').classList.remove('hidden');
+            
+            renderBoard();
+        }
+
         // Show toast
         function showToast(message, type) {
             const container = document.getElementById('toastContainer');
@@ -811,19 +1329,22 @@
             if (type === 'error') bgColor = 'bg-red-600';
             if (type === 'capture') bgColor = 'bg-purple-600';
             if (type === 'info') bgColor = 'bg-blue-600';
+            
             toast.className = `toast px-4 py-2 rounded-lg ${bgColor} text-white font-medium shadow-lg`;
             toast.textContent = message;
             container.appendChild(toast);
+            
             setTimeout(() => toast.remove(), 3000);
         }
-        // Check for saved game on load
+
+        // Check for room code in URL on load
         window.onload = () => {
-            const saved = localStorage.getItem('baaraTehniSave');
-            if (saved) {
-                document.getElementById('loadGameSection').classList.remove('hidden');
+            const urlParams = new URLSearchParams(window.location.search);
+            const urlRoomCode = urlParams.get('room');
+            if (urlRoomCode) {
+                showJoinRoom();
             }
         };
     </script>
 </body>
 </html>
-
