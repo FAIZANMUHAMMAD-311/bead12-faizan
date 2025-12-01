@@ -438,548 +438,735 @@
         </div>
     </div>
 
-    <script>
-        // Game Constants
-        const BOARD_SIZE = 5;
-        const ROOM_CODE_LENGTH = 6;
+<script>
+    // Game Constants
+    const BOARD_SIZE = 5;
+    const ROOM_CODE_LENGTH = 6;
 
-        // Game State
-        let board = [];
-        let player1Name = '';
-        let player2Name = '';
-        let currentPlayer = 1;
-        let player1Beads = 12;
-        let player2Beads = 12;
-        let selectedCell = null;
-        let validMoves = [];
-        let captureMoves = [];
-        let chainCapture = false;
-        let chainCaptureFrom = null;
-        let gameOver = false;
+    // Game State
+    let board = [];
+    let player1Name = '';
+    let player2Name = '';
+    let currentPlayer = 1;
+    let player1Beads = 12;
+    let player2Beads = 12;
+    let selectedCell = null;
+    let validMoves = [];
+    let captureMoves = [];
+    let chainCapture = false;
+    let chainCaptureFrom = null;
+    let gameOver = false;
 
-        // Online State
-        let peer = null;
-        let conn = null;
-        let isHost = false;
-        let myPlayerNumber = 0;
-        let roomCode = '';
-        let myName = '';
-        let opponentName = '';
-        let isOnline = false;
+    // Online State
+    let peer = null;
+    let conn = null;
+    let isHost = false;
+    let myPlayerNumber = 0;
+    let roomCode = '';
+    let myName = '';
+    let opponentName = '';
+    let isOnline = false;
+    let connectionTimeout = null;
+    let isConnected = false;
 
-        // Generate room code
-        function generateRoomCode() {
-            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-            let code = '';
-            for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
-                code += chars.charAt(Math.floor(Math.random() * chars.length));
+    // Generate room code
+    function generateRoomCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < ROOM_CODE_LENGTH; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        return code;
+    }
+
+    // Initialize PeerJS
+    function initializePeer(id = null) {
+        return new Promise((resolve, reject) => {
+            // Clean up existing peer
+            if (peer) {
+                peer.destroy();
+                peer = null;
             }
-            return code;
-        }
 
-        // Initialize PeerJS
-        function initializePeer(id = null) {
-            return new Promise((resolve, reject) => {
-                const peerId = id ? `baara-tehni-${id}` : undefined;
-                peer = new Peer(peerId, {
-                    debug: 1
-                });
-
-                peer.on('open', (id) => {
-                    console.log('Peer ID:', id);
-                    resolve(id);
-                });
-
-                peer.on('error', (err) => {
-                    console.error('Peer error:', err);
-                    if (err.type === 'unavailable-id') {
-                        showToast('Room code already in use. Try another.', 'error');
-                    } else if (err.type === 'peer-unavailable') {
-                        showToast('Room not found. Check the code.', 'error');
-                        document.getElementById('joinStatus').textContent = 'Room not found';
-                    } else {
-                        showToast('Connection error. Please try again.', 'error');
-                    }
-                    reject(err);
-                });
-
-                peer.on('connection', (connection) => {
-                    handleConnection(connection);
-                });
-
-                peer.on('disconnected', () => {
-                    console.log('Peer disconnected');
-                });
-            });
-        }
-
-        // Handle connection
-        function handleConnection(connection) {
-            conn = connection;
+            const peerId = id ? `baara-tehni-${id}` : undefined;
             
-            conn.on('open', () => {
-                console.log('Connection opened');
-                if (isHost) {
-                    // Send player info to guest
-                    conn.send({
+            // Use free PeerJS cloud server with explicit config
+            peer = new Peer(peerId, {
+                debug: 2,
+                config: {
+                    'iceServers': [
+                        { urls: 'stun:stun.l.google.com:19302' },
+                        { urls: 'stun:stun1.l.google.com:19302' },
+                        { urls: 'stun:stun2.l.google.com:19302' }
+                    ]
+                }
+            });
+
+            const openTimeout = setTimeout(() => {
+                reject(new Error('Peer initialization timeout'));
+            }, 15000);
+
+            peer.on('open', (id) => {
+                clearTimeout(openTimeout);
+                console.log('My Peer ID:', id);
+                resolve(id);
+            });
+
+            peer.on('error', (err) => {
+                clearTimeout(openTimeout);
+                console.error('Peer error:', err);
+                
+                if (err.type === 'unavailable-id') {
+                    showToast('Room code already in use. Try another.', 'error');
+                } else if (err.type === 'peer-unavailable') {
+                    showToast('Room not found. Check the code.', 'error');
+                    const joinStatus = document.getElementById('joinStatus');
+                    if (joinStatus) joinStatus.textContent = 'Room not found';
+                    const joinBtn = document.getElementById('joinBtn');
+                    if (joinBtn) joinBtn.disabled = false;
+                } else if (err.type === 'network') {
+                    showToast('Network error. Check your connection.', 'error');
+                } else {
+                    showToast('Connection error: ' + err.type, 'error');
+                }
+                reject(err);
+            });
+
+            // HOST: Listen for incoming connections
+            peer.on('connection', (connection) => {
+                console.log('Host received connection from guest');
+                setupConnection(connection);
+            });
+
+            peer.on('disconnected', () => {
+                console.log('Peer disconnected from server');
+                // Try to reconnect
+                if (peer && !peer.destroyed) {
+                    peer.reconnect();
+                }
+            });
+        });
+    }
+
+    // Setup connection handlers (used by both host and guest)
+    function setupConnection(connection) {
+        conn = connection;
+        
+        conn.on('open', () => {
+            console.log('Connection opened successfully');
+            isConnected = true;
+            clearTimeout(connectionTimeout);
+            
+            if (isHost) {
+                // Host sends their info first
+                console.log('Host sending player info');
+                document.getElementById('connectionStatus').textContent = 'Player connected! Sending game info...';
+                
+                setTimeout(() => {
+                    sendData({
                         type: 'playerInfo',
                         name: myName,
                         playerNumber: 1
                     });
-                }
-            });
+                }, 300);
+            } else {
+                // Guest waits for host info, then responds
+                console.log('Guest connected, waiting for host info');
+                document.getElementById('joinStatus').textContent = 'Connected! Waiting for host...';
+            }
+        });
 
-            conn.on('data', (data) => {
-                handleMessage(data);
-            });
+        conn.on('data', (data) => {
+            console.log('Received data:', data);
+            handleMessage(data);
+        });
 
-            conn.on('close', () => {
-                console.log('Connection closed');
-                if (isOnline && !gameOver) {
-                    showDisconnectModal();
-                }
-            });
+        conn.on('close', () => {
+            console.log('Connection closed');
+            isConnected = false;
+            if (isOnline && !gameOver) {
+                showDisconnectModal();
+            }
+        });
 
-            conn.on('error', (err) => {
-                console.error('Connection error:', err);
-                showToast('Connection error', 'error');
-            });
+        conn.on('error', (err) => {
+            console.error('Connection error:', err);
+            isConnected = false;
+            showToast('Connection error: ' + err.message, 'error');
+        });
+    }
+
+    // Safe send data function
+    function sendData(data) {
+        if (conn && conn.open) {
+            console.log('Sending:', data);
+            conn.send(data);
+            return true;
+        } else {
+            console.error('Cannot send - connection not open');
+            showToast('Connection lost. Cannot send data.', 'error');
+            return false;
+        }
+    }
+
+    // Handle incoming messages
+    function handleMessage(data) {
+        console.log('Processing message:', data.type);
+
+        switch (data.type) {
+            case 'playerInfo':
+                handlePlayerInfo(data);
+                break;
+
+            case 'startGame':
+                currentPlayer = data.firstPlayer;
+                startOnlineGame();
+                break;
+
+            case 'move':
+                receiveMove(data);
+                break;
+
+            case 'rematchRequest':
+                showRematchRequest(data.from);
+                break;
+
+            case 'rematchAccepted':
+                startRematch();
+                break;
+
+            case 'rematchDeclined':
+                showToast('Rematch declined', 'info');
+                break;
+
+            case 'chat':
+                showToast(`${opponentName}: ${data.message}`, 'info');
+                break;
+                
+            case 'ping':
+                sendData({ type: 'pong' });
+                break;
+                
+            case 'pong':
+                console.log('Connection alive');
+                break;
+        }
+    }
+
+    // Handle player info exchange
+    function handlePlayerInfo(data) {
+        opponentName = data.name;
+        console.log('Received player info from:', opponentName);
+        
+        if (isHost) {
+            // Host received guest's info
+            player1Name = myName;
+            player2Name = opponentName;
+            console.log('Host: Game ready -', player1Name, 'vs', player2Name);
+            showWaitingRoom();
+        } else {
+            // Guest received host's info
+            myPlayerNumber = 2;
+            player1Name = opponentName;
+            player2Name = myName;
+            console.log('Guest: Game ready -', player1Name, 'vs', player2Name);
+            
+            // Guest sends their info back
+            setTimeout(() => {
+                sendData({
+                    type: 'playerInfo',
+                    name: myName,
+                    playerNumber: 2
+                });
+                showWaitingRoom();
+            }, 200);
+        }
+    }
+
+    // Show create room screen
+    async function showCreateRoom() {
+        myName = document.getElementById('playerNameInput').value.trim() || 'Player 1';
+        roomCode = generateRoomCode();
+        
+        document.getElementById('mainMenuScreen').classList.add('hidden');
+        document.getElementById('createRoomScreen').classList.remove('hidden');
+        document.getElementById('roomCodeDisplay').textContent = roomCode;
+        
+        const roomLink = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
+        document.getElementById('roomLinkDisplay').value = roomLink;
+        document.getElementById('connectionStatus').textContent = 'Creating room...';
+
+        try {
+            await initializePeer(roomCode);
+            isHost = true;
+            myPlayerNumber = 1;
+            player1Name = myName;
+            document.getElementById('connectionStatus').textContent = '✓ Room created! Share the code above.';
+            showToast('Room created successfully!', 'success');
+        } catch (err) {
+            console.error('Failed to create room:', err);
+            document.getElementById('connectionStatus').textContent = '✗ Failed to create room. Try again.';
+        }
+    }
+
+    // Show join room screen
+    function showJoinRoom() {
+        myName = document.getElementById('playerNameInput').value.trim() || 'Player 2';
+        
+        document.getElementById('mainMenuScreen').classList.add('hidden');
+        document.getElementById('joinRoomScreen').classList.remove('hidden');
+        document.getElementById('joinStatus').textContent = '';
+        document.getElementById('joinBtn').disabled = false;
+
+        // Check for room code in URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlRoomCode = urlParams.get('room');
+        if (urlRoomCode) {
+            document.getElementById('joinCodeInput').value = urlRoomCode.toUpperCase();
+        }
+    }
+
+    // Join room
+    async function joinRoom() {
+        const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
+        if (code.length !== ROOM_CODE_LENGTH) {
+            showToast('Please enter a valid 6-character code', 'error');
+            return;
         }
 
-        // Handle incoming messages
-        function handleMessage(data) {
-            console.log('Received:', data);
+        roomCode = code;
+        document.getElementById('joinStatus').textContent = 'Initializing...';
+        document.getElementById('joinBtn').disabled = true;
 
-            switch (data.type) {
-                case 'playerInfo':
-                    opponentName = data.name;
-                    if (!isHost) {
-                        myPlayerNumber = 2;
-                        player1Name = opponentName;
-                        player2Name = myName;
-                        // Send back our info
-                        conn.send({
-                            type: 'playerInfo',
-                            name: myName,
-                            playerNumber: 2
-                        });
-                        showWaitingRoom();
-                    } else {
-                        player2Name = opponentName;
-                        showWaitingRoom();
+        try {
+            // Initialize our peer first (without a specific ID)
+            await initializePeer();
+            isHost = false;
+            
+            document.getElementById('joinStatus').textContent = 'Connecting to room...';
+            
+            // Set connection timeout
+            connectionTimeout = setTimeout(() => {
+                if (!isConnected) {
+                    document.getElementById('joinStatus').textContent = 'Connection timeout. Room may not exist or host disconnected.';
+                    document.getElementById('joinBtn').disabled = false;
+                    showToast('Connection timeout', 'error');
+                    
+                    if (conn) {
+                        conn.close();
+                        conn = null;
                     }
-                    break;
+                }
+            }, 15000);
+            
+            // Connect to host's peer
+            console.log('Attempting to connect to:', `baara-tehni-${roomCode}`);
+            const connection = peer.connect(`baara-tehni-${roomCode}`, {
+                reliable: true,
+                serialization: 'json'
+            });
+            
+            if (!connection) {
+                throw new Error('Failed to create connection');
+            }
+            
+            setupConnection(connection);
 
-                case 'startGame':
-                    currentPlayer = data.firstPlayer;
-                    startOnlineGame();
-                    break;
+        } catch (err) {
+            console.error('Join room error:', err);
+            document.getElementById('joinStatus').textContent = 'Failed to connect. Please try again.';
+            document.getElementById('joinBtn').disabled = false;
+            clearTimeout(connectionTimeout);
+        }
+    }
 
-                case 'move':
-                    receiveMove(data);
-                    break;
+    // Show waiting room
+    function showWaitingRoom() {
+        document.getElementById('createRoomScreen').classList.add('hidden');
+        document.getElementById('joinRoomScreen').classList.add('hidden');
+        document.getElementById('waitingRoomScreen').classList.remove('hidden');
 
-                case 'rematchRequest':
-                    showRematchRequest(data.from);
-                    break;
+        document.getElementById('waitingPlayer1').textContent = player1Name;
+        document.getElementById('waitingPlayer2').textContent = player2Name;
 
-                case 'rematchAccepted':
-                    startRematch();
-                    break;
+        if (isHost) {
+            document.getElementById('hostControls').classList.remove('hidden');
+            document.getElementById('guestWaiting').classList.add('hidden');
+        } else {
+            document.getElementById('hostControls').classList.add('hidden');
+            document.getElementById('guestWaiting').classList.remove('hidden');
+        }
+        
+        showToast('Both players connected!', 'success');
+    }
 
-                case 'rematchDeclined':
-                    showToast('Rematch declined', 'info');
-                    break;
+    // Host starts game
+    function hostStartGame() {
+        if (!isConnected) {
+            showToast('Connection lost. Cannot start game.', 'error');
+            return;
+        }
+        
+        // Random first player
+        const firstPlayer = Math.random() < 0.5 ? 1 : 2;
+        currentPlayer = firstPlayer;
+        
+        sendData({
+            type: 'startGame',
+            firstPlayer: firstPlayer
+        });
+        
+        startOnlineGame();
+    }
 
-                case 'chat':
-                    showToast(`${opponentName}: ${data.message}`, 'info');
-                    break;
+    // Start online game
+    function startOnlineGame() {
+        isOnline = true;
+        gameOver = false;
+        initializeBoard();
+        
+        document.getElementById('waitingRoomScreen').classList.add('hidden');
+        document.getElementById('gameScreen').classList.remove('hidden');
+        document.getElementById('onlineIndicator').classList.remove('hidden');
+        
+        document.getElementById('player1Name').textContent = player1Name;
+        document.getElementById('player2Name').textContent = player2Name;
+
+        // Show YOU badge
+        if (myPlayerNumber === 1) {
+            document.getElementById('player1You').classList.remove('hidden');
+            document.getElementById('player2You').classList.add('hidden');
+        } else {
+            document.getElementById('player2You').classList.remove('hidden');
+            document.getElementById('player1You').classList.add('hidden');
+        }
+
+        renderBoard();
+        updateTurnUI();
+        
+        const firstPlayerName = currentPlayer === 1 ? player1Name : player2Name;
+        showToast(`Game started! ${firstPlayerName} goes first.`, 'success');
+    }
+
+    // Initialize board
+    function initializeBoard() {
+        board = [];
+        for (let i = 0; i < BOARD_SIZE; i++) {
+            board[i] = [];
+            for (let j = 0; j < BOARD_SIZE; j++) {
+                if (i < 2) {
+                    board[i][j] = 'X';
+                } else if (i > 2) {
+                    board[i][j] = 'O';
+                } else if (i === 2) {
+                    if (j < 2) board[i][j] = 'X';
+                    else if (j > 2) board[i][j] = 'O';
+                    else board[i][j] = '.';
+                }
+            }
+        }
+        player1Beads = 12;
+        player2Beads = 12;
+        selectedCell = null;
+        validMoves = [];
+        captureMoves = [];
+        chainCapture = false;
+    }
+
+    // Check if it's my turn
+    function isMyTurn() {
+        if (!isOnline) return true;
+        return currentPlayer === myPlayerNumber;
+    }
+
+    // Update turn UI
+    function updateTurnUI() {
+        const turnText = currentPlayer === 1 ? `${player1Name}'s Turn` : `${player2Name}'s Turn`;
+        document.getElementById('turnText').textContent = turnText;
+
+        // Show/hide waiting indicator
+        if (isOnline) {
+            if (isMyTurn()) {
+                document.getElementById('waitingTurn').classList.add('hidden');
+                document.getElementById('gameInstructions').classList.remove('hidden');
+            } else {
+                document.getElementById('waitingTurn').classList.remove('hidden');
+                document.getElementById('gameInstructions').classList.add('hidden');
             }
         }
 
-        // Show create room screen
-        async function showCreateRoom() {
-            myName = document.getElementById('playerNameInput').value.trim() || 'Player 1';
-            roomCode = generateRoomCode();
-            
-            document.getElementById('mainMenuScreen').classList.add('hidden');
-            document.getElementById('createRoomScreen').classList.remove('hidden');
-            document.getElementById('roomCodeDisplay').textContent = roomCode;
-            
-            const roomLink = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
-            document.getElementById('roomLinkDisplay').value = roomLink;
-            document.getElementById('connectionStatus').textContent = 'Initializing...';
+        // Highlight current player card
+        const p1Card = document.getElementById('player1Card');
+        const p2Card = document.getElementById('player2Card');
+        
+        if (currentPlayer === 1) {
+            p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+            p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+        } else {
+            p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+            p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+        }
+    }
 
-            try {
-                await initializePeer(roomCode);
-                isHost = true;
-                myPlayerNumber = 1;
-                player1Name = myName;
-                document.getElementById('connectionStatus').textContent = 'Room created! Waiting for player...';
-            } catch (err) {
-                document.getElementById('connectionStatus').textContent = 'Failed to create room';
+    // Render board
+    function renderBoard() {
+        const boardEl = document.getElementById('board');
+        boardEl.innerHTML = '';
+        
+        const canInteract = !isOnline || isMyTurn();
+        
+        for (let i = 0; i < BOARD_SIZE; i++) {
+            const row = document.createElement('div');
+            row.className = 'flex items-center';
+            
+            const rowNum = document.createElement('div');
+            rowNum.className = 'w-8 text-center text-cyan-400 font-medium';
+            rowNum.textContent = i;
+            row.appendChild(rowNum);
+
+            for (let j = 0; j < BOARD_SIZE; j++) {
+                const cell = document.createElement('div');
+                cell.className = 'board-cell w-12 h-12 md:w-16 md:h-16 rounded-lg bg-slate-700/50 border border-slate-600/50 flex items-center justify-center cursor-pointer';
+                cell.dataset.row = i;
+                cell.dataset.col = j;
+
+                if (!canInteract) {
+                    cell.classList.add('disabled');
+                }
+
+                const isValidMove = validMoves.some(m => m.toR === i && m.toC === j);
+                const isCaptureMove = captureMoves.some(m => m.toR === i && m.toC === j);
+                
+                if (isValidMove && canInteract) cell.classList.add('valid-move');
+                if (isCaptureMove && canInteract) cell.classList.add('capture-move');
+
+                if (board[i][j] === 'X') {
+                    const piece = document.createElement('div');
+                    piece.className = 'piece player1 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
+                    piece.textContent = 'X';
+                    cell.appendChild(piece);
+                    cell.classList.add('has-piece');
+                } else if (board[i][j] === 'O') {
+                    const piece = document.createElement('div');
+                    piece.className = 'piece player2 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
+                    piece.textContent = 'O';
+                    cell.appendChild(piece);
+                    cell.classList.add('has-piece');
+                }
+
+                if (selectedCell && selectedCell.row === i && selectedCell.col === j) {
+                    cell.classList.add('selected');
+                }
+
+                if (canInteract) {
+                    cell.addEventListener('click', () => handleCellClick(i, j));
+                }
+                
+                row.appendChild(cell);
             }
+            boardEl.appendChild(row);
         }
 
-        // Show join room screen
-        function showJoinRoom() {
-            myName = document.getElementById('playerNameInput').value.trim() || 'Player 2';
-            
-            document.getElementById('mainMenuScreen').classList.add('hidden');
-            document.getElementById('joinRoomScreen').classList.remove('hidden');
+        document.getElementById('player1Beads').textContent = player1Beads;
+        document.getElementById('player2Beads').textContent = player2Beads;
+        updateTurnUI();
+    }
 
-            // Check for room code in URL
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlRoomCode = urlParams.get('room');
-            if (urlRoomCode) {
-                document.getElementById('joinCodeInput').value = urlRoomCode.toUpperCase();
-            }
-        }
+    // Handle cell click
+    function handleCellClick(row, col) {
+        if (!isMyTurn() && isOnline) return;
+        
+        const playerChar = currentPlayer === 1 ? 'X' : 'O';
 
-        // Join room
-        async function joinRoom() {
-            const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
-            if (code.length !== ROOM_CODE_LENGTH) {
-                showToast('Please enter a valid 6-character code', 'error');
+        if (chainCapture) {
+            const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
+            if (captureMove) {
+                executeCapture(captureMove, true);
                 return;
             }
-
-            roomCode = code;
-            document.getElementById('joinStatus').textContent = 'Connecting...';
-            document.getElementById('joinBtn').disabled = true;
-
-            try {
-                await initializePeer();
-                isHost = false;
-                
-                // Connect to host
-                conn = peer.connect(`baara-tehni-${roomCode}`, {
-                    reliable: true
-                });
-                
-                handleConnection(conn);
-                
-                conn.on('open', () => {
-                    conn.send({
-                        type: 'playerInfo',
-                        name: myName,
-                        playerNumber: 2
-                    });
-                });
-
-            } catch (err) {
-                document.getElementById('joinStatus').textContent = 'Failed to connect';
-                document.getElementById('joinBtn').disabled = false;
-            }
+            return;
         }
 
-        // Show waiting room
-        function showWaitingRoom() {
-            document.getElementById('createRoomScreen').classList.add('hidden');
-            document.getElementById('joinRoomScreen').classList.add('hidden');
-            document.getElementById('waitingRoomScreen').classList.remove('hidden');
-
-            document.getElementById('waitingPlayer1').textContent = player1Name;
-            document.getElementById('waitingPlayer2').textContent = player2Name;
-
-            if (isHost) {
-                document.getElementById('hostControls').classList.remove('hidden');
-                document.getElementById('guestWaiting').classList.add('hidden');
-            } else {
-                document.getElementById('hostControls').classList.add('hidden');
-                document.getElementById('guestWaiting').classList.remove('hidden');
-            }
-        }
-
-        // Host starts game
-        function hostStartGame() {
-            // Random first player
-            const firstPlayer = Math.random() < 0.5 ? 1 : 2;
-            currentPlayer = firstPlayer;
-            
-            conn.send({
-                type: 'startGame',
-                firstPlayer: firstPlayer
-            });
-            
-            startOnlineGame();
-        }
-
-        // Start online game
-        function startOnlineGame() {
-            isOnline = true;
-            gameOver = false;
-            initializeBoard();
-            
-            document.getElementById('waitingRoomScreen').classList.add('hidden');
-            document.getElementById('gameScreen').classList.remove('hidden');
-            document.getElementById('onlineIndicator').classList.remove('hidden');
-            
-            document.getElementById('player1Name').textContent = player1Name;
-            document.getElementById('player2Name').textContent = player2Name;
-
-            // Show YOU badge
-            if (myPlayerNumber === 1) {
-                document.getElementById('player1You').classList.remove('hidden');
-                document.getElementById('player2You').classList.add('hidden');
-            } else {
-                document.getElementById('player2You').classList.remove('hidden');
-                document.getElementById('player1You').classList.add('hidden');
-            }
-
+        if (board[row][col] === playerChar) {
+            selectedCell = { row, col };
+            calculateValidMoves(row, col, playerChar);
             renderBoard();
-            updateTurnUI();
+            return;
         }
 
-        // Initialize board
-        function initializeBoard() {
-            board = [];
-            for (let i = 0; i < BOARD_SIZE; i++) {
-                board[i] = [];
-                for (let j = 0; j < BOARD_SIZE; j++) {
-                    if (i < 2) {
-                        board[i][j] = 'X';
-                    } else if (i > 2) {
-                        board[i][j] = 'O';
-                    } else if (i === 2) {
-                        if (j < 2) board[i][j] = 'X';
-                        else if (j > 2) board[i][j] = 'O';
-                        else board[i][j] = '.';
-                    }
-                }
-            }
-            player1Beads = 12;
-            player2Beads = 12;
-            selectedCell = null;
-            validMoves = [];
-            captureMoves = [];
-            chainCapture = false;
-        }
+        if (selectedCell) {
+            const simpleMove = validMoves.find(m => m.toR === row && m.toC === col && !m.isCapture);
+            const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
 
-        // Check if it's my turn
-        function isMyTurn() {
-            if (!isOnline) return true;
-            return currentPlayer === myPlayerNumber;
-        }
-
-        // Update turn UI
-        function updateTurnUI() {
-            const turnText = currentPlayer === 1 ? `${player1Name}'s Turn` : `${player2Name}'s Turn`;
-            document.getElementById('turnText').textContent = turnText;
-
-            // Show/hide waiting indicator
-            if (isOnline) {
-                if (isMyTurn()) {
-                    document.getElementById('waitingTurn').classList.add('hidden');
-                    document.getElementById('gameInstructions').classList.remove('hidden');
-                } else {
-                    document.getElementById('waitingTurn').classList.remove('hidden');
-                    document.getElementById('gameInstructions').classList.add('hidden');
-                }
-            }
-
-            // Highlight current player card
-            const p1Card = document.getElementById('player1Card');
-            const p2Card = document.getElementById('player2Card');
-            
-            if (currentPlayer === 1) {
-                p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
-                p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+            if (captureMove) {
+                executeCapture(captureMove, true);
+            } else if (simpleMove) {
+                executeMove(simpleMove, true);
             } else {
-                p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
-                p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
-            }
-        }
-
-        // Render board
-        function renderBoard() {
-            const boardEl = document.getElementById('board');
-            boardEl.innerHTML = '';
-            
-            const canInteract = !isOnline || isMyTurn();
-            
-            for (let i = 0; i < BOARD_SIZE; i++) {
-                const row = document.createElement('div');
-                row.className = 'flex items-center';
-                
-                const rowNum = document.createElement('div');
-                rowNum.className = 'w-8 text-center text-cyan-400 font-medium';
-                rowNum.textContent = i;
-                row.appendChild(rowNum);
-
-                for (let j = 0; j < BOARD_SIZE; j++) {
-                    const cell = document.createElement('div');
-                    cell.className = 'board-cell w-12 h-12 md:w-16 md:h-16 rounded-lg bg-slate-700/50 border border-slate-600/50 flex items-center justify-center cursor-pointer';
-                    cell.dataset.row = i;
-                    cell.dataset.col = j;
-
-                    if (!canInteract) {
-                        cell.classList.add('disabled');
-                    }
-
-                    const isValidMove = validMoves.some(m => m.toR === i && m.toC === j);
-                    const isCaptureMove = captureMoves.some(m => m.toR === i && m.toC === j);
-                    
-                    if (isValidMove && canInteract) cell.classList.add('valid-move');
-                    if (isCaptureMove && canInteract) cell.classList.add('capture-move');
-
-                    if (board[i][j] === 'X') {
-                        const piece = document.createElement('div');
-                        piece.className = 'piece player1 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
-                        piece.textContent = 'X';
-                        cell.appendChild(piece);
-                        cell.classList.add('has-piece');
-                    } else if (board[i][j] === 'O') {
-                        const piece = document.createElement('div');
-                        piece.className = 'piece player2 w-9 h-9 md:w-12 md:h-12 rounded-full flex items-center justify-center text-white font-bold text-lg';
-                        piece.textContent = 'O';
-                        cell.appendChild(piece);
-                        cell.classList.add('has-piece');
-                    }
-
-                    if (selectedCell && selectedCell.row === i && selectedCell.col === j) {
-                        cell.classList.add('selected');
-                    }
-
-                    if (canInteract) {
-                        cell.addEventListener('click', () => handleCellClick(i, j));
-                    }
-                    
-                    row.appendChild(cell);
-                }
-                boardEl.appendChild(row);
-            }
-
-            document.getElementById('player1Beads').textContent = player1Beads;
-            document.getElementById('player2Beads').textContent = player2Beads;
-            updateTurnUI();
-        }
-
-        // Handle cell click
-        function handleCellClick(row, col) {
-            if (!isMyTurn() && isOnline) return;
-            
-            const playerChar = currentPlayer === 1 ? 'X' : 'O';
-
-            if (chainCapture) {
-                const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
-                if (captureMove) {
-                    executeCapture(captureMove, true);
-                    return;
-                }
-                return;
-            }
-
-            if (board[row][col] === playerChar) {
-                selectedCell = { row, col };
-                calculateValidMoves(row, col, playerChar);
+                selectedCell = null;
+                validMoves = [];
+                captureMoves = [];
                 renderBoard();
-                return;
-            }
-
-            if (selectedCell) {
-                const simpleMove = validMoves.find(m => m.toR === row && m.toC === col && !m.isCapture);
-                const captureMove = captureMoves.find(m => m.toR === row && m.toC === col);
-
-                if (captureMove) {
-                    executeCapture(captureMove, true);
-                } else if (simpleMove) {
-                    executeMove(simpleMove, true);
-                } else {
-                    selectedCell = null;
-                    validMoves = [];
-                    captureMoves = [];
-                    renderBoard();
-                }
             }
         }
+    }
 
-        // Calculate valid moves
-        function calculateValidMoves(fromR, fromC, playerChar) {
-            validMoves = [];
-            captureMoves = [];
-            
-            const directions = [
-                [-1, 0], [1, 0], [0, -1], [0, 1],
-                [-1, -1], [-1, 1], [1, -1], [1, 1]
-            ];
+    // Calculate valid moves
+    function calculateValidMoves(fromR, fromC, playerChar) {
+        validMoves = [];
+        captureMoves = [];
+        
+        const directions = [
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [-1, 1], [1, -1], [1, 1]
+        ];
 
-            for (const [dr, dc] of directions) {
-                const toR = fromR + dr;
-                const toC = fromC + dc;
-                if (isValidSimpleMove(fromR, fromC, toR, toC, playerChar)) {
-                    validMoves.push({ fromR, fromC, toR, toC, isCapture: false });
-                }
+        for (const [dr, dc] of directions) {
+            const toR = fromR + dr;
+            const toC = fromC + dc;
+            if (isValidSimpleMove(fromR, fromC, toR, toC, playerChar)) {
+                validMoves.push({ fromR, fromC, toR, toC, isCapture: false });
+            }
 
-                const capToR = fromR + dr * 2;
-                const capToC = fromC + dc * 2;
-                const captureInfo = isValidCapture(fromR, fromC, capToR, capToC, playerChar);
-                if (captureInfo.valid) {
-                    captureMoves.push({ 
-                        fromR, fromC, 
-                        toR: capToR, toC: capToC, 
-                        capR: captureInfo.capR, capC: captureInfo.capC,
-                        isCapture: true 
-                    });
-                }
+            const capToR = fromR + dr * 2;
+            const capToC = fromC + dc * 2;
+            const captureInfo = isValidCapture(fromR, fromC, capToR, capToC, playerChar);
+            if (captureInfo.valid) {
+                captureMoves.push({ 
+                    fromR, fromC, 
+                    toR: capToR, toC: capToC, 
+                    capR: captureInfo.capR, capC: captureInfo.capC,
+                    isCapture: true 
+                });
             }
         }
+    }
 
-        // Check valid simple move
-        function isValidSimpleMove(fromR, fromC, toR, toC, playerChar) {
-            if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) return false;
-            if (board[toR][toC] !== '.') return false;
-            
-            const dr = Math.abs(toR - fromR);
-            const dc = Math.abs(toC - fromC);
-            return dr <= 1 && dc <= 1 && !(dr === 0 && dc === 0);
-        }
+    // Check valid simple move
+    function isValidSimpleMove(fromR, fromC, toR, toC, playerChar) {
+        if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) return false;
+        if (board[toR][toC] !== '.') return false;
+        
+        const dr = Math.abs(toR - fromR);
+        const dc = Math.abs(toC - fromC);
+        return dr <= 1 && dc <= 1 && !(dr === 0 && dc === 0);
+    }
 
-        // Check valid capture
-        function isValidCapture(fromR, fromC, toR, toC, playerChar) {
-            if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) {
-                return { valid: false };
-            }
-            if (board[toR][toC] !== '.') return { valid: false };
-            
-            const dr = toR - fromR;
-            const dc = toC - fromC;
-            if (!((dr === -2 || dr === 0 || dr === 2) && (dc === -2 || dc === 0 || dc === 2))) {
-                return { valid: false };
-            }
-            if (dr === 0 && dc === 0) return { valid: false };
-            
-            const capR = fromR + dr / 2;
-            const capC = fromC + dc / 2;
-            const opponent = playerChar === 'X' ? 'O' : 'X';
-            
-            if (board[capR][capC] === opponent) {
-                return { valid: true, capR, capC };
-            }
+    // Check valid capture
+    function isValidCapture(fromR, fromC, toR, toC, playerChar) {
+        if (toR < 0 || toR >= BOARD_SIZE || toC < 0 || toC >= BOARD_SIZE) {
             return { valid: false };
         }
+        if (board[toR][toC] !== '.') return { valid: false };
+        
+        const dr = toR - fromR;
+        const dc = toC - fromC;
+        if (!((dr === -2 || dr === 0 || dr === 2) && (dc === -2 || dc === 0 || dc === 2))) {
+            return { valid: false };
+        }
+        if (dr === 0 && dc === 0) return { valid: false };
+        
+        const capR = fromR + dr / 2;
+        const capC = fromC + dc / 2;
+        const opponent = playerChar === 'X' ? 'O' : 'X';
+        
+        if (board[capR][capC] === opponent) {
+            return { valid: true, capR, capC };
+        }
+        return { valid: false };
+    }
 
-        // Execute simple move
-        function executeMove(move, sendToOpponent = false) {
+    // Execute simple move
+    function executeMove(move, sendToOpponent = false) {
+        const playerChar = currentPlayer === 1 ? 'X' : 'O';
+        board[move.toR][move.toC] = playerChar;
+        board[move.fromR][move.fromC] = '.';
+        
+        showToast('Move successful! ✓', 'success');
+
+        if (sendToOpponent && isOnline) {
+            sendData({
+                type: 'move',
+                moveType: 'simple',
+                move: move
+            });
+        }
+
+        switchTurn();
+    }
+
+    // Execute capture
+    function executeCapture(move, sendToOpponent = false) {
+        const playerChar = currentPlayer === 1 ? 'X' : 'O';
+        board[move.toR][move.toC] = playerChar;
+        board[move.fromR][move.fromC] = '.';
+        board[move.capR][move.capC] = '.';
+
+        if (playerChar === 'X') {
+            player2Beads--;
+        } else {
+            player1Beads--;
+        }
+
+        showToast('Captured! 🎯', 'capture');
+
+        // Check for chain captures
+        const chainMoves = [];
+        const directions = [
+            [-1, 0], [1, 0], [0, -1], [0, 1],
+            [-1, -1], [-1, 1], [1, -1], [1, 1]
+        ];
+
+        for (const [dr, dc] of directions) {
+            const capToR = move.toR + dr * 2;
+            const capToC = move.toC + dc * 2;
+            const captureInfo = isValidCapture(move.toR, move.toC, capToR, capToC, playerChar);
+            if (captureInfo.valid) {
+                chainMoves.push({
+                    fromR: move.toR, fromC: move.toC,
+                    toR: capToR, toC: capToC,
+                    capR: captureInfo.capR, capC: captureInfo.capC,
+                    isCapture: true
+                });
+            }
+        }
+
+        if (sendToOpponent && isOnline) {
+            sendData({
+                type: 'move',
+                moveType: 'capture',
+                move: move,
+                hasChain: chainMoves.length > 0
+            });
+        }
+
+        if (chainMoves.length > 0) {
+            chainCapture = true;
+            chainCaptureFrom = { row: move.toR, col: move.toC };
+            selectedCell = chainCaptureFrom;
+            validMoves = [];
+            captureMoves = chainMoves;
+            renderBoard();
+            showToast('Chain capture available! 🔥', 'info');
+            return;
+        }
+
+        chainCapture = false;
+        chainCaptureFrom = null;
+        switchTurn();
+    }
+
+    // Receive move from opponent
+    function receiveMove(data) {
+        if (data.moveType === 'simple') {
+            const move = data.move;
             const playerChar = currentPlayer === 1 ? 'X' : 'O';
             board[move.toR][move.toC] = playerChar;
             board[move.fromR][move.fromC] = '.';
-            
-            showToast('Move successful! ✓', 'success');
-
-            if (sendToOpponent && isOnline) {
-                conn.send({
-                    type: 'move',
-                    moveType: 'simple',
-                    move: move
-                });
-            }
-
+            showToast('Opponent moved', 'info');
             switchTurn();
-        }
-
-        // Execute capture
-        function executeCapture(move, sendToOpponent = false) {
+        } else if (data.moveType === 'capture') {
+            const move = data.move;
             const playerChar = currentPlayer === 1 ? 'X' : 'O';
             board[move.toR][move.toC] = playerChar;
             board[move.fromR][move.fromC] = '.';
@@ -991,296 +1178,234 @@
                 player1Beads--;
             }
 
-            showToast('Captured! 🎯', 'capture');
+            showToast('Opponent captured!', 'capture');
 
-            // Check for chain captures
-            const chainMoves = [];
-            const directions = [
-                [-1, 0], [1, 0], [0, -1], [0, 1],
-                [-1, -1], [-1, 1], [1, -1], [1, 1]
-            ];
-
-            for (const [dr, dc] of directions) {
-                const capToR = move.toR + dr * 2;
-                const capToC = move.toC + dc * 2;
-                const captureInfo = isValidCapture(move.toR, move.toC, capToR, capToC, playerChar);
-                if (captureInfo.valid) {
-                    chainMoves.push({
-                        fromR: move.toR, fromC: move.toC,
-                        toR: capToR, toC: capToC,
-                        capR: captureInfo.capR, capC: captureInfo.capC,
-                        isCapture: true
-                    });
-                }
-            }
-
-            if (sendToOpponent && isOnline) {
-                conn.send({
-                    type: 'move',
-                    moveType: 'capture',
-                    move: move,
-                    hasChain: chainMoves.length > 0
-                });
-            }
-
-            if (chainMoves.length > 0) {
-                chainCapture = true;
-                chainCaptureFrom = { row: move.toR, col: move.toC };
-                selectedCell = chainCaptureFrom;
-                validMoves = [];
-                captureMoves = chainMoves;
-                renderBoard();
-                showToast('Chain capture available! 🔥', 'info');
-                return;
-            }
-
-            chainCapture = false;
-            chainCaptureFrom = null;
-            switchTurn();
-        }
-
-        // Receive move from opponent
-        function receiveMove(data) {
-            if (data.moveType === 'simple') {
-                const move = data.move;
-                const playerChar = currentPlayer === 1 ? 'X' : 'O';
-                board[move.toR][move.toC] = playerChar;
-                board[move.fromR][move.fromC] = '.';
-                showToast('Opponent moved', 'info');
+            if (!data.hasChain) {
                 switchTurn();
-            } else if (data.moveType === 'capture') {
-                const move = data.move;
-                const playerChar = currentPlayer === 1 ? 'X' : 'O';
-                board[move.toR][move.toC] = playerChar;
-                board[move.fromR][move.fromC] = '.';
-                board[move.capR][move.capC] = '.';
-
-                if (playerChar === 'X') {
-                    player2Beads--;
-                } else {
-                    player1Beads--;
-                }
-
-                showToast('Opponent captured!', 'capture');
-
-                if (!data.hasChain) {
-                    switchTurn();
-                } else {
-                    renderBoard();
-                }
+            } else {
+                renderBoard();
             }
         }
+    }
 
-        // Switch turn
-        function switchTurn() {
-            selectedCell = null;
-            validMoves = [];
-            captureMoves = [];
+    // Switch turn
+    function switchTurn() {
+        selectedCell = null;
+        validMoves = [];
+        captureMoves = [];
 
-            if (checkWinCondition()) return;
+        if (checkWinCondition()) return;
 
-            currentPlayer = currentPlayer === 1 ? 2 : 1;
-            renderBoard();
+        currentPlayer = currentPlayer === 1 ? 2 : 1;
+        renderBoard();
 
-            if (!hasAnyMove(currentPlayer === 1 ? 'X' : 'O')) {
-                const winner = currentPlayer === 1 ? player2Name : player1Name;
-                showVictory(winner, 'No legal moves available!');
-                return;
-            }
+        if (!hasAnyMove(currentPlayer === 1 ? 'X' : 'O')) {
+            const winner = currentPlayer === 1 ? player2Name : player1Name;
+            showVictory(winner, 'No legal moves available!');
+            return;
         }
+    }
 
-        // Check win condition
-        function checkWinCondition() {
-            if (player1Beads === 0) {
-                showVictory(player2Name, 'All opponent beads captured!');
-                return true;
-            }
-            if (player2Beads === 0) {
-                showVictory(player1Name, 'All opponent beads captured!');
-                return true;
-            }
-            return false;
+    // Check win condition
+    function checkWinCondition() {
+        if (player1Beads === 0) {
+            showVictory(player2Name, 'All opponent beads captured!');
+            return true;
         }
+        if (player2Beads === 0) {
+            showVictory(player1Name, 'All opponent beads captured!');
+            return true;
+        }
+        return false;
+    }
 
-        // Check if player has any move
-        function hasAnyMove(playerChar) {
-            for (let i = 0; i < BOARD_SIZE; i++) {
-                for (let j = 0; j < BOARD_SIZE; j++) {
-                    if (board[i][j] === playerChar) {
-                        const directions = [
-                            [-1, 0], [1, 0], [0, -1], [0, 1],
-                            [-1, -1], [-1, 1], [1, -1], [1, 1]
-                        ];
-                        for (const [dr, dc] of directions) {
-                            if (isValidSimpleMove(i, j, i + dr, j + dc, playerChar)) return true;
-                            if (isValidCapture(i, j, i + dr * 2, j + dc * 2, playerChar).valid) return true;
-                        }
+    // Check if player has any move
+    function hasAnyMove(playerChar) {
+        for (let i = 0; i < BOARD_SIZE; i++) {
+            for (let j = 0; j < BOARD_SIZE; j++) {
+                if (board[i][j] === playerChar) {
+                    const directions = [
+                        [-1, 0], [1, 0], [0, -1], [0, 1],
+                        [-1, -1], [-1, 1], [1, -1], [1, 1]
+                    ];
+                    for (const [dr, dc] of directions) {
+                        if (isValidSimpleMove(i, j, i + dr, j + dc, playerChar)) return true;
+                        if (isValidCapture(i, j, i + dr * 2, j + dc * 2, playerChar).valid) return true;
                     }
                 }
             }
-            return false;
         }
+        return false;
+    }
 
-        // Show victory
-        function showVictory(winner, reason) {
-            gameOver = true;
-            document.getElementById('winnerText').textContent = `${winner} Wins!`;
-            document.getElementById('winReason').textContent = reason;
-            document.getElementById('victoryModal').classList.remove('hidden');
-            document.getElementById('rematchBtn').classList.remove('hidden');
-        }
+    // Show victory
+    function showVictory(winner, reason) {
+        gameOver = true;
+        document.getElementById('winnerText').textContent = `${winner} Wins!`;
+        document.getElementById('winReason').textContent = reason;
+        document.getElementById('victoryModal').classList.remove('hidden');
+        document.getElementById('rematchBtn').classList.remove('hidden');
+    }
 
-        // Request rematch
-        function requestRematch() {
-            if (isOnline && conn) {
-                conn.send({
-                    type: 'rematchRequest',
-                    from: myName
-                });
-                showToast('Rematch request sent!', 'info');
-                document.getElementById('victoryModal').classList.add('hidden');
-            }
-        }
-
-        // Show rematch request
-        function showRematchRequest(from) {
-            document.getElementById('rematchText').textContent = `${from} wants a rematch!`;
-            document.getElementById('rematchModal').classList.remove('hidden');
-        }
-
-        // Accept rematch
-        function acceptRematch() {
-            document.getElementById('rematchModal').classList.add('hidden');
-            if (isOnline && conn) {
-                conn.send({ type: 'rematchAccepted' });
-            }
-            startRematch();
-        }
-
-        // Decline rematch
-        function declineRematch() {
-            document.getElementById('rematchModal').classList.add('hidden');
-            if (isOnline && conn) {
-                conn.send({ type: 'rematchDeclined' });
-            }
-        }
-
-        // Start rematch
-        function startRematch() {
+    // Request rematch
+    function requestRematch() {
+        if (isOnline && conn) {
+            sendData({
+                type: 'rematchRequest',
+                from: myName
+            });
+            showToast('Rematch request sent!', 'info');
             document.getElementById('victoryModal').classList.add('hidden');
-            document.getElementById('rematchModal').classList.add('hidden');
-            
-            // Swap first player
-            currentPlayer = currentPlayer === 1 ? 2 : 1;
-            gameOver = false;
-            initializeBoard();
-            renderBoard();
-            showToast('New game started!', 'success');
         }
+    }
 
-        // Show disconnect modal
-        function showDisconnectModal() {
-            document.getElementById('disconnectModal').classList.remove('hidden');
+    // Show rematch request
+    function showRematchRequest(from) {
+        document.getElementById('rematchText').textContent = `${from} wants a rematch!`;
+        document.getElementById('rematchModal').classList.remove('hidden');
+    }
+
+    // Accept rematch
+    function acceptRematch() {
+        document.getElementById('rematchModal').classList.add('hidden');
+        if (isOnline && conn) {
+            sendData({ type: 'rematchAccepted' });
         }
+        startRematch();
+    }
 
-        // Leave game
-        function leaveGame() {
-            if (conn) {
-                conn.close();
-            }
-            if (peer) {
-                peer.destroy();
-            }
-            backToMenu();
+    // Decline rematch
+    function declineRematch() {
+        document.getElementById('rematchModal').classList.add('hidden');
+        if (isOnline && conn) {
+            sendData({ type: 'rematchDeclined' });
         }
+    }
 
-        // Copy room code
-        function copyRoomCode() {
-            navigator.clipboard.writeText(roomCode);
-            showToast('Room code copied! 📋', 'success');
-        }
+    // Start rematch
+    function startRematch() {
+        document.getElementById('victoryModal').classList.add('hidden');
+        document.getElementById('rematchModal').classList.add('hidden');
+        
+        // Swap first player
+        currentPlayer = currentPlayer === 1 ? 2 : 1;
+        gameOver = false;
+        initializeBoard();
+        renderBoard();
+        showToast('New game started!', 'success');
+    }
 
-        // Copy room link
-        function copyRoomLink() {
-            const link = document.getElementById('roomLinkDisplay').value;
-            navigator.clipboard.writeText(link);
-            showToast('Room link copied! 📋', 'success');
-        }
+    // Show disconnect modal
+    function showDisconnectModal() {
+        document.getElementById('disconnectModal').classList.remove('hidden');
+    }
 
-        // Back to menu
-        function backToMenu() {
-            if (conn) conn.close();
-            if (peer) peer.destroy();
-            
-            peer = null;
+    // Leave game
+    function leaveGame() {
+        cleanupConnection();
+        backToMenu();
+    }
+    
+    // Cleanup connection
+    function cleanupConnection() {
+        clearTimeout(connectionTimeout);
+        isConnected = false;
+        
+        if (conn) {
+            conn.close();
             conn = null;
-            isHost = false;
-            isOnline = false;
-            gameOver = false;
-            
-            document.getElementById('createRoomScreen').classList.add('hidden');
-            document.getElementById('joinRoomScreen').classList.add('hidden');
-            document.getElementById('waitingRoomScreen').classList.add('hidden');
-            document.getElementById('gameScreen').classList.add('hidden');
-            document.getElementById('victoryModal').classList.add('hidden');
-            document.getElementById('disconnectModal').classList.add('hidden');
-            document.getElementById('rematchModal').classList.add('hidden');
-            document.getElementById('mainMenuScreen').classList.remove('hidden');
-            
-            // Clear URL params
-            window.history.replaceState({}, document.title, window.location.pathname);
         }
-
-        // Play offline (original game mode)
-        function playOffline() {
-            isOnline = false;
-            player1Name = document.getElementById('playerNameInput').value.trim() || 'Player 1';
-            player2Name = 'Player 2';
-            myPlayerNumber = 1;
-            currentPlayer = 1;
-            
-            initializeBoard();
-            
-            document.getElementById('mainMenuScreen').classList.add('hidden');
-            document.getElementById('gameScreen').classList.remove('hidden');
-            document.getElementById('onlineIndicator').classList.add('hidden');
-            
-            document.getElementById('player1Name').textContent = player1Name;
-            document.getElementById('player2Name').textContent = player2Name;
-            document.getElementById('player1You').classList.add('hidden');
-            document.getElementById('player2You').classList.add('hidden');
-            document.getElementById('waitingTurn').classList.add('hidden');
-            document.getElementById('gameInstructions').classList.remove('hidden');
-            
-            renderBoard();
+        if (peer) {
+            peer.destroy();
+            peer = null;
         }
+    }
 
-        // Show toast
-        function showToast(message, type) {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            
-            let bgColor = 'bg-slate-700';
-            if (type === 'success') bgColor = 'bg-emerald-600';
-            if (type === 'error') bgColor = 'bg-red-600';
-            if (type === 'capture') bgColor = 'bg-purple-600';
-            if (type === 'info') bgColor = 'bg-blue-600';
-            
-            toast.className = `toast px-4 py-2 rounded-lg ${bgColor} text-white font-medium shadow-lg`;
-            toast.textContent = message;
-            container.appendChild(toast);
-            
-            setTimeout(() => toast.remove(), 3000);
+    // Copy room code
+    function copyRoomCode() {
+        navigator.clipboard.writeText(roomCode);
+        showToast('Room code copied! 📋', 'success');
+    }
+
+    // Copy room link
+    function copyRoomLink() {
+        const link = document.getElementById('roomLinkDisplay').value;
+        navigator.clipboard.writeText(link);
+        showToast('Room link copied! 📋', 'success');
+    }
+
+    // Back to menu
+    function backToMenu() {
+        cleanupConnection();
+        
+        isHost = false;
+        isOnline = false;
+        gameOver = false;
+        isConnected = false;
+        
+        document.getElementById('createRoomScreen').classList.add('hidden');
+        document.getElementById('joinRoomScreen').classList.add('hidden');
+        document.getElementById('waitingRoomScreen').classList.add('hidden');
+        document.getElementById('gameScreen').classList.add('hidden');
+        document.getElementById('victoryModal').classList.add('hidden');
+        document.getElementById('disconnectModal').classList.add('hidden');
+        document.getElementById('rematchModal').classList.add('hidden');
+        document.getElementById('mainMenuScreen').classList.remove('hidden');
+        
+        // Clear URL params
+        window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    // Play offline (original game mode)
+    function playOffline() {
+        isOnline = false;
+        player1Name = document.getElementById('playerNameInput').value.trim() || 'Player 1';
+        player2Name = 'Player 2';
+        myPlayerNumber = 1;
+        currentPlayer = 1;
+        
+        initializeBoard();
+        
+        document.getElementById('mainMenuScreen').classList.add('hidden');
+        document.getElementById('gameScreen').classList.remove('hidden');
+        document.getElementById('onlineIndicator').classList.add('hidden');
+        
+        document.getElementById('player1Name').textContent = player1Name;
+        document.getElementById('player2Name').textContent = player2Name;
+        document.getElementById('player1You').classList.add('hidden');
+        document.getElementById('player2You').classList.add('hidden');
+        document.getElementById('waitingTurn').classList.add('hidden');
+        document.getElementById('gameInstructions').classList.remove('hidden');
+        
+        renderBoard();
+    }
+
+    // Show toast
+    function showToast(message, type) {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        
+        let bgColor = 'bg-slate-700';
+        if (type === 'success') bgColor = 'bg-emerald-600';
+        if (type === 'error') bgColor = 'bg-red-600';
+        if (type === 'capture') bgColor = 'bg-purple-600';
+        if (type === 'info') bgColor = 'bg-blue-600';
+        
+        toast.className = `toast px-4 py-2 rounded-lg ${bgColor} text-white font-medium shadow-lg`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        
+        setTimeout(() => toast.remove(), 3000);
+    }
+
+    // Check for room code in URL on load
+    window.onload = () => {
+        const urlParams = new URLSearchParams(window.location.search);
+        const urlRoomCode = urlParams.get('room');
+        if (urlRoomCode) {
+            showJoinRoom();
         }
-
-        // Check for room code in URL on load
-        window.onload = () => {
-            const urlParams = new URLSearchParams(window.location.search);
-            const urlRoomCode = urlParams.get('room');
-            if (urlRoomCode) {
-                showJoinRoom();
-            }
-        };
-    </script>
+    };
+</script>
 </body>
 </html>
