@@ -468,6 +468,8 @@
     let isOnline = false;
     let connectionTimeout = null;
     let isConnected = false;
+    let retryCount = 0;
+    const MAX_RETRIES = 3;
 
     // Generate room code
     function generateRoomCode() {
@@ -479,100 +481,170 @@
         return code;
     }
 
-    // Initialize PeerJS
+    // Initialize PeerJS with multiple server options
     function initializePeer(id = null) {
         return new Promise((resolve, reject) => {
             // Clean up existing peer
             if (peer) {
-                peer.destroy();
+                try {
+                    peer.destroy();
+                } catch (e) {
+                    console.log('Peer cleanup error:', e);
+                }
                 peer = null;
             }
 
-            const peerId = id ? `baara-tehni-${id}` : undefined;
+            const peerId = id ? `baaratehni-${id}` : `baaratehni-${generateRoomCode()}-${Date.now()}`;
             
-            // Use free PeerJS cloud server with explicit config
-            peer = new Peer(peerId, {
-                debug: 2,
+            console.log('Initializing peer with ID:', peerId);
+            
+            // Try with default PeerJS cloud server first
+            const peerConfig = {
+                debug: 3, // Maximum debug level
                 config: {
-                    'iceServers': [
+                    iceServers: [
                         { urls: 'stun:stun.l.google.com:19302' },
                         { urls: 'stun:stun1.l.google.com:19302' },
-                        { urls: 'stun:stun2.l.google.com:19302' }
+                        { urls: 'stun:stun2.l.google.com:19302' },
+                        { urls: 'stun:stun3.l.google.com:19302' },
+                        { urls: 'stun:stun4.l.google.com:19302' },
+                        { urls: 'stun:global.stun.twilio.com:3478' },
+                        { urls: 'stun:stun.stunprotocol.org:3478' }
                     ]
                 }
-            });
+            };
+
+            try {
+                peer = new Peer(peerId, peerConfig);
+            } catch (e) {
+                console.error('Failed to create peer:', e);
+                reject(e);
+                return;
+            }
 
             const openTimeout = setTimeout(() => {
-                reject(new Error('Peer initialization timeout'));
-            }, 15000);
+                console.error('Peer initialization timeout');
+                reject(new Error('Peer initialization timeout - PeerJS server may be down'));
+            }, 20000);
 
             peer.on('open', (id) => {
                 clearTimeout(openTimeout);
-                console.log('My Peer ID:', id);
+                console.log('✓ Peer opened successfully. My ID:', id);
+                updateConnectionStatus('Peer connected to server ✓');
                 resolve(id);
             });
 
             peer.on('error', (err) => {
                 clearTimeout(openTimeout);
-                console.error('Peer error:', err);
+                console.error('Peer error:', err.type, err);
                 
-                if (err.type === 'unavailable-id') {
-                    showToast('Room code already in use. Try another.', 'error');
-                } else if (err.type === 'peer-unavailable') {
-                    showToast('Room not found. Check the code.', 'error');
-                    const joinStatus = document.getElementById('joinStatus');
-                    if (joinStatus) joinStatus.textContent = 'Room not found';
-                    const joinBtn = document.getElementById('joinBtn');
-                    if (joinBtn) joinBtn.disabled = false;
-                } else if (err.type === 'network') {
-                    showToast('Network error. Check your connection.', 'error');
-                } else {
-                    showToast('Connection error: ' + err.type, 'error');
+                let errorMessage = 'Connection error';
+                
+                switch(err.type) {
+                    case 'unavailable-id':
+                        errorMessage = 'Room code already in use. Try creating a new room.';
+                        break;
+                    case 'peer-unavailable':
+                        errorMessage = 'Room not found. The host may have disconnected.';
+                        break;
+                    case 'network':
+                        errorMessage = 'Network error. Check your internet connection.';
+                        break;
+                    case 'server-error':
+                        errorMessage = 'PeerJS server error. Please try again later.';
+                        break;
+                    case 'socket-error':
+                        errorMessage = 'Socket error. Please refresh and try again.';
+                        break;
+                    case 'socket-closed':
+                        errorMessage = 'Connection to server lost.';
+                        break;
+                    case 'disconnected':
+                        errorMessage = 'Disconnected from server. Attempting to reconnect...';
+                        if (peer && !peer.destroyed) {
+                            peer.reconnect();
+                        }
+                        return;
+                    default:
+                        errorMessage = `Error: ${err.type}`;
                 }
+                
+                showToast(errorMessage, 'error');
+                updateConnectionStatus(errorMessage);
+                
+                const joinBtn = document.getElementById('joinBtn');
+                if (joinBtn) joinBtn.disabled = false;
+                
                 reject(err);
             });
 
             // HOST: Listen for incoming connections
             peer.on('connection', (connection) => {
-                console.log('Host received connection from guest');
+                console.log('✓ Host received incoming connection');
+                updateConnectionStatus('Player connecting...');
                 setupConnection(connection);
             });
 
             peer.on('disconnected', () => {
-                console.log('Peer disconnected from server');
-                // Try to reconnect
+                console.log('Peer disconnected from signaling server');
+                updateConnectionStatus('Disconnected. Reconnecting...');
                 if (peer && !peer.destroyed) {
-                    peer.reconnect();
+                    setTimeout(() => {
+                        try {
+                            peer.reconnect();
+                        } catch (e) {
+                            console.error('Reconnect failed:', e);
+                        }
+                    }, 1000);
                 }
             });
+
+            peer.on('close', () => {
+                console.log('Peer connection closed');
+            });
         });
+    }
+
+    // Update connection status on screen
+    function updateConnectionStatus(message) {
+        const statusEl = document.getElementById('connectionStatus');
+        if (statusEl) statusEl.textContent = message;
+        
+        const joinStatusEl = document.getElementById('joinStatus');
+        if (joinStatusEl) joinStatusEl.textContent = message;
+        
+        console.log('Status:', message);
     }
 
     // Setup connection handlers (used by both host and guest)
     function setupConnection(connection) {
         conn = connection;
+        console.log('Setting up connection handlers...');
         
         conn.on('open', () => {
-            console.log('Connection opened successfully');
+            console.log('✓ Data connection opened successfully!');
             isConnected = true;
             clearTimeout(connectionTimeout);
+            retryCount = 0;
             
             if (isHost) {
-                // Host sends their info first
-                console.log('Host sending player info');
-                document.getElementById('connectionStatus').textContent = 'Player connected! Sending game info...';
+                console.log('Host: Sending player info to guest');
+                updateConnectionStatus('Player connected! Starting game...');
                 
+                // Small delay to ensure connection is stable
                 setTimeout(() => {
-                    sendData({
-                        type: 'playerInfo',
-                        name: myName,
-                        playerNumber: 1
-                    });
-                }, 300);
+                    if (conn && conn.open) {
+                        conn.send({
+                            type: 'playerInfo',
+                            name: myName,
+                            playerNumber: 1
+                        });
+                        console.log('Host: Player info sent');
+                    }
+                }, 500);
             } else {
-                // Guest waits for host info, then responds
-                console.log('Guest connected, waiting for host info');
-                document.getElementById('joinStatus').textContent = 'Connected! Waiting for host...';
+                console.log('Guest: Connected to host, waiting for their info');
+                updateConnectionStatus('Connected! Waiting for host info...');
             }
         });
 
@@ -592,18 +664,23 @@
         conn.on('error', (err) => {
             console.error('Connection error:', err);
             isConnected = false;
-            showToast('Connection error: ' + err.message, 'error');
+            showToast('Connection error: ' + (err.message || err), 'error');
         });
     }
 
     // Safe send data function
     function sendData(data) {
         if (conn && conn.open) {
-            console.log('Sending:', data);
-            conn.send(data);
-            return true;
+            try {
+                console.log('Sending:', data.type);
+                conn.send(data);
+                return true;
+            } catch (e) {
+                console.error('Send error:', e);
+                return false;
+            }
         } else {
-            console.error('Cannot send - connection not open');
+            console.error('Cannot send - connection not open. State:', conn ? conn.open : 'no conn');
             showToast('Connection lost. Cannot send data.', 'error');
             return false;
         }
@@ -648,7 +725,7 @@
                 break;
                 
             case 'pong':
-                console.log('Connection alive');
+                console.log('Connection alive (pong received)');
                 break;
         }
     }
@@ -656,30 +733,33 @@
     // Handle player info exchange
     function handlePlayerInfo(data) {
         opponentName = data.name;
-        console.log('Received player info from:', opponentName);
+        console.log('Received player info from:', opponentName, 'playerNumber:', data.playerNumber);
         
         if (isHost) {
             // Host received guest's info
             player1Name = myName;
             player2Name = opponentName;
-            console.log('Host: Game ready -', player1Name, 'vs', player2Name);
+            console.log('Host: Both players ready -', player1Name, 'vs', player2Name);
             showWaitingRoom();
         } else {
             // Guest received host's info
             myPlayerNumber = 2;
             player1Name = opponentName;
             player2Name = myName;
-            console.log('Guest: Game ready -', player1Name, 'vs', player2Name);
+            console.log('Guest: Both players ready -', player1Name, 'vs', player2Name);
             
-            // Guest sends their info back
+            // Guest sends their info back after a small delay
             setTimeout(() => {
-                sendData({
-                    type: 'playerInfo',
-                    name: myName,
-                    playerNumber: 2
-                });
+                if (conn && conn.open) {
+                    conn.send({
+                        type: 'playerInfo',
+                        name: myName,
+                        playerNumber: 2
+                    });
+                    console.log('Guest: Sent player info to host');
+                }
                 showWaitingRoom();
-            }, 200);
+            }, 300);
         }
     }
 
@@ -694,18 +774,18 @@
         
         const roomLink = `${window.location.origin}${window.location.pathname}?room=${roomCode}`;
         document.getElementById('roomLinkDisplay').value = roomLink;
-        document.getElementById('connectionStatus').textContent = 'Creating room...';
+        updateConnectionStatus('Creating room...');
 
         try {
             await initializePeer(roomCode);
             isHost = true;
             myPlayerNumber = 1;
             player1Name = myName;
-            document.getElementById('connectionStatus').textContent = '✓ Room created! Share the code above.';
-            showToast('Room created successfully!', 'success');
+            updateConnectionStatus('✓ Room created! Waiting for player to join...');
+            showToast('Room created! Share the code.', 'success');
         } catch (err) {
             console.error('Failed to create room:', err);
-            document.getElementById('connectionStatus').textContent = '✗ Failed to create room. Try again.';
+            updateConnectionStatus('✗ Failed to create room: ' + err.message);
         }
     }
 
@@ -715,7 +795,7 @@
         
         document.getElementById('mainMenuScreen').classList.add('hidden');
         document.getElementById('joinRoomScreen').classList.remove('hidden');
-        document.getElementById('joinStatus').textContent = '';
+        updateConnectionStatus('');
         document.getElementById('joinBtn').disabled = false;
 
         // Check for room code in URL
@@ -726,7 +806,7 @@
         }
     }
 
-    // Join room
+    // Join room with retry logic
     async function joinRoom() {
         const code = document.getElementById('joinCodeInput').value.trim().toUpperCase();
         if (code.length !== ROOM_CODE_LENGTH) {
@@ -735,48 +815,71 @@
         }
 
         roomCode = code;
-        document.getElementById('joinStatus').textContent = 'Initializing...';
         document.getElementById('joinBtn').disabled = true;
+        retryCount = 0;
+        
+        await attemptJoin();
+    }
+
+    // Attempt to join with retries
+    async function attemptJoin() {
+        retryCount++;
+        updateConnectionStatus(`Connecting... (Attempt ${retryCount}/${MAX_RETRIES})`);
 
         try {
-            // Initialize our peer first (without a specific ID)
+            // Initialize our peer first
             await initializePeer();
             isHost = false;
             
-            document.getElementById('joinStatus').textContent = 'Connecting to room...';
+            updateConnectionStatus('Connecting to room...');
             
             // Set connection timeout
             connectionTimeout = setTimeout(() => {
                 if (!isConnected) {
-                    document.getElementById('joinStatus').textContent = 'Connection timeout. Room may not exist or host disconnected.';
-                    document.getElementById('joinBtn').disabled = false;
-                    showToast('Connection timeout', 'error');
+                    console.log('Connection timeout, attempt:', retryCount);
                     
-                    if (conn) {
-                        conn.close();
-                        conn = null;
+                    if (retryCount < MAX_RETRIES) {
+                        updateConnectionStatus(`Timeout. Retrying... (${retryCount}/${MAX_RETRIES})`);
+                        if (conn) {
+                            try { conn.close(); } catch(e) {}
+                            conn = null;
+                        }
+                        setTimeout(() => attemptJoin(), 2000);
+                    } else {
+                        updateConnectionStatus('Connection failed. Please check:\n1. Room code is correct\n2. Host has the room open\n3. Both on same network or internet works');
+                        document.getElementById('joinBtn').disabled = false;
+                        showToast('Connection failed after ' + MAX_RETRIES + ' attempts', 'error');
                     }
                 }
-            }, 15000);
+            }, 12000);
             
             // Connect to host's peer
-            console.log('Attempting to connect to:', `baara-tehni-${roomCode}`);
-            const connection = peer.connect(`baara-tehni-${roomCode}`, {
+            const hostPeerId = `baaratehni-${roomCode}`;
+            console.log('Attempting to connect to:', hostPeerId);
+            
+            const connection = peer.connect(hostPeerId, {
                 reliable: true,
                 serialization: 'json'
             });
             
             if (!connection) {
-                throw new Error('Failed to create connection');
+                throw new Error('Failed to create connection object');
             }
             
+            console.log('Connection object created, waiting for open...');
             setupConnection(connection);
 
         } catch (err) {
             console.error('Join room error:', err);
-            document.getElementById('joinStatus').textContent = 'Failed to connect. Please try again.';
-            document.getElementById('joinBtn').disabled = false;
             clearTimeout(connectionTimeout);
+            
+            if (retryCount < MAX_RETRIES) {
+                updateConnectionStatus(`Error. Retrying... (${retryCount}/${MAX_RETRIES})`);
+                setTimeout(() => attemptJoin(), 2000);
+            } else {
+                updateConnectionStatus('Failed to connect: ' + err.message);
+                document.getElementById('joinBtn').disabled = false;
+            }
         }
     }
 
@@ -797,12 +900,12 @@
             document.getElementById('guestWaiting').classList.remove('hidden');
         }
         
-        showToast('Both players connected!', 'success');
+        showToast('Both players connected! 🎮', 'success');
     }
 
     // Host starts game
     function hostStartGame() {
-        if (!isConnected) {
+        if (!isConnected || !conn || !conn.open) {
             showToast('Connection lost. Cannot start game.', 'error');
             return;
         }
@@ -886,12 +989,17 @@
 
         // Show/hide waiting indicator
         if (isOnline) {
-            if (isMyTurn()) {
-                document.getElementById('waitingTurn').classList.add('hidden');
-                document.getElementById('gameInstructions').classList.remove('hidden');
-            } else {
-                document.getElementById('waitingTurn').classList.remove('hidden');
-                document.getElementById('gameInstructions').classList.add('hidden');
+            const waitingTurn = document.getElementById('waitingTurn');
+            const gameInstructions = document.getElementById('gameInstructions');
+            
+            if (waitingTurn && gameInstructions) {
+                if (isMyTurn()) {
+                    waitingTurn.classList.add('hidden');
+                    gameInstructions.classList.remove('hidden');
+                } else {
+                    waitingTurn.classList.remove('hidden');
+                    gameInstructions.classList.add('hidden');
+                }
             }
         }
 
@@ -899,18 +1007,22 @@
         const p1Card = document.getElementById('player1Card');
         const p2Card = document.getElementById('player2Card');
         
-        if (currentPlayer === 1) {
-            p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
-            p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
-        } else {
-            p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
-            p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+        if (p1Card && p2Card) {
+            if (currentPlayer === 1) {
+                p1Card.classList.add('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+                p2Card.classList.remove('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+            } else {
+                p2Card.classList.add('ring-2', 'ring-green-400', 'shadow-lg', 'shadow-green-500/20');
+                p1Card.classList.remove('ring-2', 'ring-red-400', 'shadow-lg', 'shadow-red-500/20');
+            }
         }
     }
 
     // Render board
     function renderBoard() {
         const boardEl = document.getElementById('board');
+        if (!boardEl) return;
+        
         boardEl.innerHTML = '';
         
         const canInteract = !isOnline || isMyTurn();
@@ -967,8 +1079,11 @@
             boardEl.appendChild(row);
         }
 
-        document.getElementById('player1Beads').textContent = player1Beads;
-        document.getElementById('player2Beads').textContent = player2Beads;
+        const p1Beads = document.getElementById('player1Beads');
+        const p2Beads = document.getElementById('player2Beads');
+        if (p1Beads) p1Beads.textContent = player1Beads;
+        if (p2Beads) p2Beads.textContent = player2Beads;
+        
         updateTurnUI();
     }
 
@@ -1249,7 +1364,7 @@
 
     // Request rematch
     function requestRematch() {
-        if (isOnline && conn) {
+        if (isOnline && conn && conn.open) {
             sendData({
                 type: 'rematchRequest',
                 from: myName
@@ -1297,7 +1412,8 @@
 
     // Show disconnect modal
     function showDisconnectModal() {
-        document.getElementById('disconnectModal').classList.remove('hidden');
+        const modal = document.getElementById('disconnectModal');
+        if (modal) modal.classList.remove('hidden');
     }
 
     // Leave game
@@ -1310,28 +1426,42 @@
     function cleanupConnection() {
         clearTimeout(connectionTimeout);
         isConnected = false;
+        retryCount = 0;
         
         if (conn) {
-            conn.close();
+            try { conn.close(); } catch(e) {}
             conn = null;
         }
         if (peer) {
-            peer.destroy();
+            try { peer.destroy(); } catch(e) {}
             peer = null;
         }
     }
 
     // Copy room code
     function copyRoomCode() {
-        navigator.clipboard.writeText(roomCode);
-        showToast('Room code copied! 📋', 'success');
+        navigator.clipboard.writeText(roomCode).then(() => {
+            showToast('Room code copied! 📋', 'success');
+        }).catch(() => {
+            // Fallback for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = roomCode;
+            document.body.appendChild(textArea);
+            textArea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textArea);
+            showToast('Room code copied! 📋', 'success');
+        });
     }
 
     // Copy room link
     function copyRoomLink() {
         const link = document.getElementById('roomLinkDisplay').value;
-        navigator.clipboard.writeText(link);
-        showToast('Room link copied! 📋', 'success');
+        navigator.clipboard.writeText(link).then(() => {
+            showToast('Room link copied! 📋', 'success');
+        }).catch(() => {
+            showToast('Failed to copy link', 'error');
+        });
     }
 
     // Back to menu
@@ -1343,14 +1473,14 @@
         gameOver = false;
         isConnected = false;
         
-        document.getElementById('createRoomScreen').classList.add('hidden');
-        document.getElementById('joinRoomScreen').classList.add('hidden');
-        document.getElementById('waitingRoomScreen').classList.add('hidden');
-        document.getElementById('gameScreen').classList.add('hidden');
-        document.getElementById('victoryModal').classList.add('hidden');
-        document.getElementById('disconnectModal').classList.add('hidden');
-        document.getElementById('rematchModal').classList.add('hidden');
-        document.getElementById('mainMenuScreen').classList.remove('hidden');
+        const screens = ['createRoomScreen', 'joinRoomScreen', 'waitingRoomScreen', 'gameScreen', 'victoryModal', 'disconnectModal', 'rematchModal'];
+        screens.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add('hidden');
+        });
+        
+        const mainMenu = document.getElementById('mainMenuScreen');
+        if (mainMenu) mainMenu.classList.remove('hidden');
         
         // Clear URL params
         window.history.replaceState({}, document.title, window.location.pathname);
@@ -1368,14 +1498,22 @@
         
         document.getElementById('mainMenuScreen').classList.add('hidden');
         document.getElementById('gameScreen').classList.remove('hidden');
-        document.getElementById('onlineIndicator').classList.add('hidden');
+        
+        const onlineIndicator = document.getElementById('onlineIndicator');
+        if (onlineIndicator) onlineIndicator.classList.add('hidden');
         
         document.getElementById('player1Name').textContent = player1Name;
         document.getElementById('player2Name').textContent = player2Name;
-        document.getElementById('player1You').classList.add('hidden');
-        document.getElementById('player2You').classList.add('hidden');
-        document.getElementById('waitingTurn').classList.add('hidden');
-        document.getElementById('gameInstructions').classList.remove('hidden');
+        
+        const p1You = document.getElementById('player1You');
+        const p2You = document.getElementById('player2You');
+        const waitingTurn = document.getElementById('waitingTurn');
+        const gameInstructions = document.getElementById('gameInstructions');
+        
+        if (p1You) p1You.classList.add('hidden');
+        if (p2You) p2You.classList.add('hidden');
+        if (waitingTurn) waitingTurn.classList.add('hidden');
+        if (gameInstructions) gameInstructions.classList.remove('hidden');
         
         renderBoard();
     }
@@ -1383,6 +1521,11 @@
     // Show toast
     function showToast(message, type) {
         const container = document.getElementById('toastContainer');
+        if (!container) {
+            console.log('Toast:', type, message);
+            return;
+        }
+        
         const toast = document.createElement('div');
         
         let bgColor = 'bg-slate-700';
@@ -1391,11 +1534,30 @@
         if (type === 'capture') bgColor = 'bg-purple-600';
         if (type === 'info') bgColor = 'bg-blue-600';
         
-        toast.className = `toast px-4 py-2 rounded-lg ${bgColor} text-white font-medium shadow-lg`;
+        toast.className = `toast px-4 py-2 rounded-lg ${bgColor} text-white font-medium shadow-lg mb-2`;
         toast.textContent = message;
         container.appendChild(toast);
         
-        setTimeout(() => toast.remove(), 3000);
+        setTimeout(() => {
+            if (toast.parentNode) toast.remove();
+        }, 3000);
+    }
+
+    // Test PeerJS server connectivity
+    async function testConnection() {
+        showToast('Testing connection...', 'info');
+        try {
+            const testPeer = new Peer({debug: 3});
+            testPeer.on('open', (id) => {
+                showToast('✓ PeerJS server is working! ID: ' + id.substring(0,8), 'success');
+                testPeer.destroy();
+            });
+            testPeer.on('error', (err) => {
+                showToast('✗ PeerJS error: ' + err.type, 'error');
+            });
+        } catch (e) {
+            showToast('✗ Failed to connect to PeerJS', 'error');
+        }
     }
 
     // Check for room code in URL on load
@@ -1405,6 +1567,9 @@
         if (urlRoomCode) {
             showJoinRoom();
         }
+        
+        // Add test button to debug
+        console.log('Game loaded. Call testConnection() to test PeerJS server.');
     };
 </script>
 </body>
